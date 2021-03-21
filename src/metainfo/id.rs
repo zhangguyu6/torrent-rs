@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 const ID_LEN: usize = 20;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Id(#[serde(with = "serde_bytes")] Vec<u8>);
 

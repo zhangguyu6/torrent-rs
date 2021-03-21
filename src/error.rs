@@ -1,4 +1,5 @@
 use serde::{de, ser};
+use std::path::StripPrefixError;
 use std::{char, fmt::Display, io, num, result, string};
 use thiserror::Error;
 
@@ -12,6 +13,8 @@ pub enum Error {
     FromUtf8Err(#[from] string::FromUtf8Error),
     #[error("ParserErr {0}")]
     ParserIntErr(#[from] num::ParseIntError),
+    #[error("StripPrefixError {0}")]
+    StripPrefixErr(#[from] StripPrefixError),
     #[error("ConvertErr {0}")]
     ConvertIntErr(#[from] num::TryFromIntError),
     #[error("CustomErr {0}")]
