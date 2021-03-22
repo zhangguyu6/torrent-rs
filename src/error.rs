@@ -21,6 +21,10 @@ pub enum Error {
     CustomErr(String),
     #[error("ConvertCharErr {0}")]
     ConvertCharErr(#[from] char::CharTryFromError),
+    #[error("PathConvertErr")]
+    PathConvertErr,
+    #[error("EmptyRootPath")]
+    EmptyRootPath,
 }
 
 impl ser::Error for Error {

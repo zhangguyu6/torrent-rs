@@ -37,6 +37,7 @@ mod tests {
         let buf = to_bytes(a).unwrap();
         println!("{:?}", to_str(a));
         let b = from_bytes::<T>(buf.as_ref()).unwrap();
+        println!("{:?}", to_str(&b));
         assert_eq!(a, &b);
     }
     #[test]
