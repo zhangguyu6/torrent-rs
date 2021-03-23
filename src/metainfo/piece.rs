@@ -9,10 +9,11 @@ use smol::{
     fs::OpenOptions,
     io::{AsyncReadExt, BufReader},
 };
+use std::convert::TryInto;
 use std::fmt;
 use std::path::PathBuf;
 use std::result::Result as StdResult;
-use std::{convert::TryInto, usize};
+use std::usize;
 
 pub const PIECE_SIZE_256_KB: u64 = 1024 * 256;
 pub const PIECE_SIZE_512_KB: u64 = 2 * PIECE_SIZE_256_KB;
@@ -20,7 +21,7 @@ pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct HashPiece([u8; 20]);
+pub struct HashPiece(pub [u8; 20]);
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct HashPieces(pub Vec<HashPiece>);

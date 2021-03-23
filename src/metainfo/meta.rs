@@ -7,9 +7,9 @@ use std::fmt;
 use std::result::Result as StdResult;
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct URLList(Vec<String>);
+pub struct UrlList(Vec<String>);
 
-impl Serialize for URLList {
+impl Serialize for UrlList {
     fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
@@ -22,14 +22,14 @@ impl Serialize for URLList {
     }
 }
 
-impl<'de> Deserialize<'de> for URLList {
+impl<'de> Deserialize<'de> for UrlList {
     fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct URLListVisitor;
         impl<'de> Visitor<'de> for URLListVisitor {
-            type Value = URLList;
+            type Value = UrlList;
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("`String or Vec<String>`")
             }
@@ -37,13 +37,13 @@ impl<'de> Deserialize<'de> for URLList {
             where
                 E: Error,
             {
-                Ok(URLList(vec![String::from_utf8(v.into()).unwrap()]))
+                Ok(UrlList(vec![String::from_utf8(v.into()).unwrap()]))
             }
             fn visit_str<E>(self, v: &str) -> StdResult<Self::Value, E>
             where
                 E: Error,
             {
-                Ok(URLList(vec![v.to_string()]))
+                Ok(UrlList(vec![v.to_string()]))
             }
 
             fn visit_seq<A>(self, mut seq: A) -> StdResult<Self::Value, A::Error>
@@ -54,7 +54,7 @@ impl<'de> Deserialize<'de> for URLList {
                 while let Some(elem) = seq.next_element()? {
                     v.push(elem);
                 }
-                Ok(URLList(v))
+                Ok(UrlList(v))
             }
         }
         deserializer.deserialize_any(URLListVisitor)
@@ -87,7 +87,7 @@ pub struct MetaInfo {
     #[serde(rename = "url-list")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    url_list: Option<URLList>,
+    url_list: Option<UrlList>,
 
     /// The creation time of the torrent, UNIX epoch
     #[serde(rename = "creation date")]
@@ -118,24 +118,24 @@ mod tests {
     use crate::bencode::{from_bytes, from_str, to_bytes, to_str};
 
     #[test]
-    fn test_URLList() {
+    fn test_url_list() {
         let a = "http://qq1.com".to_string();
         assert_eq!(
-            to_str(&URLList(vec![a.clone()])).unwrap(),
+            to_str(&UrlList(vec![a.clone()])).unwrap(),
             "14:http://qq1.com".to_string()
         );
         assert_eq!(
-            from_str::<URLList>("14:http://qq1.com").unwrap(),
-            URLList(vec![a.clone()])
+            from_str::<UrlList>("14:http://qq1.com").unwrap(),
+            UrlList(vec![a.clone()])
         );
         let b = "http://qq2.com".to_string();
         assert_eq!(
-            to_str(&URLList(vec![a.clone(), b.clone()])).unwrap(),
+            to_str(&UrlList(vec![a.clone(), b.clone()])).unwrap(),
             "l14:http://qq1.com14:http://qq2.come".to_string()
         );
         assert_eq!(
-            from_str::<URLList>("l14:http://qq1.com14:http://qq2.come").unwrap(),
-            URLList(vec![a, b])
+            from_str::<UrlList>("l14:http://qq1.com14:http://qq2.come").unwrap(),
+            UrlList(vec![a, b])
         )
     }
 

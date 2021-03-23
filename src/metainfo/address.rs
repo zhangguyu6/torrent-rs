@@ -5,6 +5,9 @@ use serde::{
 use std::convert::TryInto;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
+
+use crate::Error;
 
 const V4_LEN: usize = 6;
 const V6_LEN: usize = 18;
@@ -12,6 +15,13 @@ const V6_LEN: usize = 18;
 /// IPv6/v4 contact information for a single peer,  see bep_0005 & bep_0032
 #[derive(Debug, Eq, PartialEq)]
 pub struct PeerAddress(SocketAddr);
+
+impl FromStr for PeerAddress {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
 
 impl Serialize for PeerAddress {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

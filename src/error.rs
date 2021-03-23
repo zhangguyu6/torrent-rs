@@ -1,4 +1,6 @@
+use data_encoding::DecodeError;
 use serde::{de, ser};
+use std::net::AddrParseError;
 use std::path::StripPrefixError;
 use std::{char, fmt::Display, io, num, result, string};
 use thiserror::Error;
@@ -25,6 +27,12 @@ pub enum Error {
     PathConvertErr,
     #[error("EmptyRootPath")]
     EmptyRootPath,
+    #[error("BrokenMagnetLinkErr {0}")]
+    BrokenMagnetLinkErr(String),
+    #[error("BASE32Err {0}")]
+    BASE32Err(#[from] DecodeError),
+    #[error("AddressErr {0}")]
+    AddressErr(#[from] AddrParseError),
 }
 
 impl ser::Error for Error {
