@@ -1,3 +1,5 @@
+use super::Info;
+use crate::bencode::to_bytes;
 use crate::error::Result;
 use crate::utils::Chains;
 use serde::{
@@ -20,10 +22,38 @@ pub const PIECE_SIZE_512_KB: u64 = 2 * PIECE_SIZE_256_KB;
 pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct HashPiece(pub [u8; 20]);
+#[derive(Debug, PartialEq, Eq, Default)]
+pub struct HashPiece([u8; 20]);
 
-#[derive(Debug, PartialEq, Eq)]
+impl HashPiece {
+    pub fn new(hash_val: [u8; 20]) -> Self {
+        Self(hash_val)
+    }
+}
+
+impl From<Info> for HashPiece {
+    fn from(info: Info) -> Self {
+        let buf = to_bytes(&info).unwrap();
+        let mut hasher = Sha1::new();
+        hasher.update(&buf);
+        let hash_val: [u8; 20] = hasher.finalize().into();
+        HashPiece::new(hash_val)
+    }
+}
+
+impl AsRef<[u8]> for HashPiece {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsMut<[u8]> for HashPiece {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Default)]
 pub struct HashPieces(pub Vec<HashPiece>);
 
 impl HashPieces {

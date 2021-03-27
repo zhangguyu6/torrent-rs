@@ -1,9 +1,12 @@
 use data_encoding::DecodeError;
+use hex::FromHexError;
 use serde::{de, ser};
 use std::net::AddrParseError;
 use std::path::StripPrefixError;
+use std::str::Utf8Error;
 use std::{char, fmt::Display, io, num, result, string};
 use thiserror::Error;
+use url::{ParseError as ParseUrlError, Url};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -28,11 +31,17 @@ pub enum Error {
     #[error("EmptyRootPath")]
     EmptyRootPath,
     #[error("BrokenMagnetLinkErr {0}")]
-    BrokenMagnetLinkErr(String),
+    BrokenMagnetLinkErr(Url),
     #[error("BASE32Err {0}")]
     BASE32Err(#[from] DecodeError),
     #[error("AddressErr {0}")]
     AddressErr(#[from] AddrParseError),
+    #[error("FromHexErr {0}")]
+    FromHexErr(#[from] FromHexError),
+    #[error("ParseUrlError {0}")]
+    FromParseUrlErr(#[from] ParseUrlError),
+    #[error("Utf8Err {0}")]
+    Utf8Err(#[from] Utf8Error),
 }
 
 impl ser::Error for Error {

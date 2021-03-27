@@ -4,21 +4,17 @@ mod value;
 
 pub use de::{from_bytes, from_str, Deserializer};
 pub use ser::{to_bytes, to_str, Serializer};
-pub use value::Value;
+pub use value::{from_value, to_value, Value};
 
 #[cfg(test)]
 mod tests {
 
-    use super::{
-        de::{from_bytes, from_str},
-        ser::{to_bytes, to_str},
-        value::Value,
-    };
+    use super::*;
 
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
 
-    fn test_value_ser_de<T: Into<Value>>(v: T) {
+    fn test_value_from_to<T: Into<Value>>(v: T) {
         let a: Value = v.into();
         println!(
             "value is {:?} , bytes is {:?}",
@@ -28,12 +24,12 @@ mod tests {
         let b: Value = from_bytes(&to_bytes(&a).unwrap()).unwrap();
         assert_eq!(a, b);
     }
-    fn test_value_de_ser(s: &str) {
+    fn test_value_to_from(s: &str) {
         let d: Value = from_bytes(s.as_bytes()).unwrap();
         let e = to_bytes(&d).unwrap();
         assert_eq!(Vec::from(s.as_bytes()), e);
     }
-    fn test_ser_de<'a, T: Serialize + Deserialize<'a> + std::fmt::Debug + Eq>(a: &T) {
+    fn test_bencode_ser_de<'a, T: Serialize + Deserialize<'a> + std::fmt::Debug + Eq>(a: &T) {
         let buf = to_bytes(a).unwrap();
         println!("{:?}", to_str(a));
         let b = from_bytes::<T>(buf.as_ref()).unwrap();
@@ -42,47 +38,47 @@ mod tests {
     }
     #[test]
     fn test_ser_de_int() {
-        test_value_ser_de(1);
-        test_value_ser_de(128845848);
-        test_value_de_ser("i0e");
-        test_value_de_ser("i1e");
-        test_value_de_ser("i-128e");
+        test_value_from_to(1);
+        test_value_from_to(128845848);
+        test_value_to_from("i0e");
+        test_value_to_from("i1e");
+        test_value_to_from("i-128e");
     }
     #[test]
     fn test_ser_de_string() {
-        test_value_ser_de("bencode");
-        test_value_ser_de("1234567890");
-        test_value_de_ser("7:bencode");
-        test_value_de_ser("11:12345678901");
+        test_value_from_to("bencode");
+        test_value_from_to("1234567890");
+        test_value_to_from("7:bencode");
+        test_value_to_from("11:12345678901");
     }
     #[test]
     fn test_ser_de_list() {
-        test_value_ser_de(Value::List(vec![1.into(), 2.into(), 3.into()]));
-        test_value_ser_de(Value::List(vec![1.into(), "2".into()]));
+        test_value_from_to(Value::List(vec![1.into(), 2.into(), 3.into()]));
+        test_value_from_to(Value::List(vec![1.into(), "2".into()]));
         let l = Value::List(vec![1.into(), "2".into()]);
-        test_value_ser_de(Value::List(vec![1.into(), "2".into(), l]));
-        test_value_de_ser("li1ei2ei3ee");
-        test_value_de_ser("li1e1:2e");
-        test_value_de_ser("li1e1:2li1e1:2ee");
+        test_value_from_to(Value::List(vec![1.into(), "2".into(), l]));
+        test_value_to_from("li1ei2ei3ee");
+        test_value_to_from("li1e1:2e");
+        test_value_to_from("li1e1:2li1e1:2ee");
     }
     #[test]
     fn test_ser_de_map() {
         let mut m = BTreeMap::new();
         m.insert("b".into(), 1.into());
-        test_value_ser_de(m.clone());
+        test_value_from_to(m.clone());
         m.insert("a".into(), "b".into());
-        test_value_ser_de(m.clone());
+        test_value_from_to(m.clone());
         let l = Value::List(vec![1.into(), "2".into()]);
         m.insert("c".into(), l);
-        test_value_ser_de(m.clone());
+        test_value_from_to(m.clone());
         let mut new_m = BTreeMap::new();
         new_m.insert("new_m".into(), 1.into());
         m.insert("d".into(), Value::Dict(new_m));
-        test_value_ser_de(m.clone());
-        test_value_de_ser("d1:bi1ee");
-        test_value_de_ser("d1:a1:b1:bi1ee");
-        test_value_de_ser("d1:a1:b1:bi1e1:cli1e1:2ee");
-        test_value_de_ser("d1:a1:b1:bi1e1:cli1e1:2e1:dd5:new_mi1eee");
+        test_value_from_to(m.clone());
+        test_value_to_from("d1:bi1ee");
+        test_value_to_from("d1:a1:b1:bi1ee");
+        test_value_to_from("d1:a1:b1:bi1e1:cli1e1:2ee");
+        test_value_to_from("d1:a1:b1:bi1e1:cli1e1:2e1:dd5:new_mi1eee");
     }
     #[test]
     fn test_ser_de_struct_sort() {
@@ -157,21 +153,21 @@ mod tests {
         #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
         struct A(i32);
         let a = A(1);
-        test_ser_de(&a);
+        test_bencode_ser_de(&a);
     }
     #[test]
     fn test_ser_de_tuple_struct() {
         #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
         struct A(i32, i64);
         let a = A(1, 2);
-        test_ser_de(&a);
+        test_bencode_ser_de(&a);
     }
     #[test]
     fn test_ser_de_tuple() {
         // https://github.com/serde-rs/serde/issues/1413
         // Deserialize &str is difficult
         let a = (1, "a".to_string());
-        test_ser_de(&a);
+        test_bencode_ser_de(&a);
     }
     #[test]
     fn test_ser_de_variant_unit() {
@@ -180,7 +176,7 @@ mod tests {
             A,
             B,
         }
-        test_ser_de(&V::A);
+        test_bencode_ser_de(&V::A);
     }
     #[test]
     fn test_ser_de_variant_newtype() {
@@ -189,7 +185,7 @@ mod tests {
             A(i64),
             B(i64),
         };
-        test_ser_de(&V::A(0));
+        test_bencode_ser_de(&V::A(0));
     }
     #[test]
     fn test_ser_de_variant_tuple() {
@@ -198,7 +194,7 @@ mod tests {
             A(i64, i64),
             B(i64, i64),
         };
-        test_ser_de(&V::A(0, 1));
+        test_bencode_ser_de(&V::A(0, 1));
     }
     #[test]
     fn test_ser_de_variant_struct() {
@@ -207,6 +203,6 @@ mod tests {
             A { a: i64, b: i64 },
             B { c: i64, d: i64 },
         };
-        test_ser_de(&V::A { a: 0, b: 1 });
+        test_bencode_ser_de(&V::A { a: 0, b: 1 });
     }
 }

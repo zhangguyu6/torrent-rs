@@ -23,6 +23,12 @@ impl FromStr for PeerAddress {
     }
 }
 
+impl ToString for PeerAddress {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 impl Serialize for PeerAddress {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

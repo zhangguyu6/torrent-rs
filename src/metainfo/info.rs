@@ -1,6 +1,10 @@
-use super::piece::HashPieces;
-use crate::error::{Error, Result};
+use super::piece::{HashPiece, HashPieces};
+use crate::{
+    error::{Error, Result},
+    to_bytes,
+};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use smol::{fs, stream::StreamExt};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -56,7 +60,7 @@ impl File {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Info {
     /// Name of the file in the single file case
     /// Or the name of the directory in the muliple file case
