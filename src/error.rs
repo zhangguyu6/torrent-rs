@@ -1,3 +1,4 @@
+use crate::krpc::KrpcError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
 use serde::{de, ser};
@@ -42,6 +43,8 @@ pub enum Error {
     FromParseUrlErr(#[from] ParseUrlError),
     #[error("Utf8Err {0}")]
     Utf8Err(#[from] Utf8Error),
+    #[error("KrpcErr {0}")]
+    KrpcErr(KrpcError),
 }
 
 impl ser::Error for Error {

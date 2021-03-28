@@ -1,16 +1,15 @@
-use super::piece::{HashPiece, HashPieces};
+use super::piece::HashPieces;
 use crate::{
+    bencode::{from_value, to_value, Value},
     error::{Error, Result},
-    to_bytes,
 };
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
 use smol::{fs, stream::StreamExt};
-use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::{cmp::Ordering, convert::TryFrom};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Ord, Clone)]
 pub struct File {
     /// Length of the file in bytes
     length: u64,
@@ -60,7 +59,7 @@ impl File {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default, Clone)]
 pub struct Info {
     /// Name of the file in the single file case
     /// Or the name of the directory in the muliple file case
@@ -116,10 +115,23 @@ impl Info {
     }
 }
 
+impl TryFrom<Value> for Info {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self> {
+        from_value(value)
+    }
+}
+
+impl Into<Value> for Info {
+    fn into(self) -> Value {
+        to_value(self).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bencode::{from_bytes, to_bytes};
+    use crate::bencode::{from_value, to_value};
     use crate::metainfo::piece::PIECE_SIZE_256_KB;
     use smol::block_on;
     use std::io::Write;
@@ -139,6 +151,13 @@ mod tests {
             let info = Info::new(dir.path(), PIECE_SIZE_256_KB).await;
             dbg!(&info);
             assert!(info.is_ok());
+            let info = info.unwrap();
+            let value = to_value(info.clone());
+            assert!(value.is_ok());
+            let info1 = from_value(value.unwrap());
+            assert!(info1.is_ok());
+            let info1 = info1.unwrap();
+            assert_eq!(info, info1);
         });
     }
 }

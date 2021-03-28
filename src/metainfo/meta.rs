@@ -1,8 +1,8 @@
-use super::{Info, PeerAddress};
+use super::PeerAddress;
 use crate::bencode::Value;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use serde::{
-    de::{Error, SeqAccess, Visitor},
+    de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::result::Result as StdResult;
@@ -39,7 +39,7 @@ impl<'de> Deserialize<'de> for UrlList {
             }
             fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
             where
-                E: Error,
+                E: de::Error,
             {
                 Ok(UrlList(vec![
                     Url::parse(str::from_utf8(v).unwrap()).unwrap()
@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for UrlList {
             }
             fn visit_str<E>(self, v: &str) -> StdResult<Self::Value, E>
             where
-                E: Error,
+                E: de::Error,
             {
                 Ok(UrlList(vec![Url::parse(v).unwrap()]))
             }
@@ -119,6 +119,20 @@ pub struct MetaInfo {
 }
 
 impl MetaInfo {
+    pub fn get_name(&self) -> Result<String> {
+        match &self.info {
+            Value::Dict(m) => {
+                if let Some(v) = m.get("name") {
+                    match v {
+                        Value::Bytes(buf) => return Ok(String::from_utf8(buf.clone())?),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        Err(Error::CustomErr("not find name".to_string()))
+    }
     pub fn get_trackers(&self) -> Result<Vec<Url>> {
         if let Some(announce) = &self.announce {
             return Ok(vec![Url::parse(announce)?]);

@@ -43,20 +43,21 @@ impl From<Info> for MagnetLink {
     }
 }
 
-// impl From<MetaInfo> for MagnetLink {
-//     fn from(metainfo: MetaInfo) -> Self {
-//         let trackers = metainfo.get_trackers().unwrap();
-//         let name = metainfo.info.name.clone();
-//         let info_hash = metainfo.info.into();
-//         let peers = metainfo.nodes;
-//         Self {
-//             info_hash,
-//             trackers,
-//             name,
-//             peers,
-//         }
-//     }
-// }
+impl From<MetaInfo> for MagnetLink {
+    fn from(metainfo: MetaInfo) -> Self {
+        let trackers = metainfo.get_trackers().unwrap();
+
+        let name = metainfo.get_name().unwrap_or_else(|_| "".to_string());
+        let info_hash = metainfo.info.into();
+        let peers = metainfo.nodes;
+        Self {
+            info_hash,
+            trackers,
+            name,
+            peers,
+        }
+    }
+}
 
 impl TryFrom<Url> for MagnetLink {
     type Error = Error;
@@ -130,39 +131,25 @@ impl TryInto<Url> for MagnetLink {
 
 #[cfg(test)]
 mod tests {
-    use sha1::{Digest, Sha1};
 
     use super::*;
-    use crate::{from_bytes, from_str, to_bytes};
+    use crate::from_bytes;
 
     #[test]
     fn test_magnetlink() {
         let url = Url::parse("magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert!(url.is_ok());
-        dbg!(MagnetLink::try_from(url.unwrap()));
-        let info: Info = Info::default();
-        dbg!(MagnetLink::from(info));
-        // let link = MagnetLink::from(Infohash:;
-        // assert_eq!(
-        //     link.to_url().as_str(),
-        //     "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
-        // );
-        // let raw_torrent = include_bytes!("example/1.txt.torrent");
+        assert!(MagnetLink::try_from(url.unwrap()).is_ok());
         let raw_torrent = include_bytes!("example/bootstrap.dat.torrent");
-        // let raw_torrent =
-        // include_bytes!("example/archlinux-2011.08.19-netinstall-i686.iso.torrent");
-        let res = from_bytes::<MetaInfo>(raw_torrent);
-
-        assert!(res.is_ok());
-        let meta_info_a = res.unwrap();
-        // dbg!(&meta_info_a);
-
-        let mut hasher = Sha1::new();
-        hasher.update(to_bytes(&meta_info_a.info).unwrap());
-        // let hash: HashPiece = meta_info_a.info.into();
-        let hash: [u8; 20] = hasher.finalize().into();
-        dbg!(&hash);
-        let mut info_hash = [0; 40];
-        dbg!(hex::encode(hash.as_ref()));
+        let metainfo = from_bytes::<MetaInfo>(raw_torrent);
+        assert!(metainfo.is_ok());
+        let metainfo = metainfo.unwrap();
+        let mgn = metainfo.try_into();
+        assert!(mgn.is_ok());
+        let mgn: MagnetLink = mgn.unwrap();
+        let url = mgn.try_into();
+        assert!(url.is_ok());
+        let url: Url = url.unwrap();
+        assert_eq!(url.as_str(),"magnet:?xt=36719ba2cecf9f3bd7c5abfb7a88e939611b536c&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&dn=bootstrap.dat");
     }
 }

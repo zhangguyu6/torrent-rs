@@ -81,7 +81,7 @@ impl Into<Vec<u8>> for &PeerAddress {
                 buf
             }
             IpAddr::V6(v6) => {
-                let mut buf = Vec::with_capacity(V4_LEN);
+                let mut buf = Vec::with_capacity(V6_LEN);
                 buf.extend_from_slice(&v6.octets());
                 buf.extend_from_slice(&port);
                 buf
