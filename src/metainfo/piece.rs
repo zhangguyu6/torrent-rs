@@ -21,13 +21,51 @@ pub const PIECE_SIZE_256_KB: u64 = 1024 * 256;
 pub const PIECE_SIZE_512_KB: u64 = 2 * PIECE_SIZE_256_KB;
 pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
+pub(crate) const ID_LEN: usize = 20;
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-pub struct HashPiece([u8; 20]);
+pub struct HashPiece([u8; ID_LEN]);
 
 impl HashPiece {
-    pub fn new(hash_val: [u8; 20]) -> Self {
+    pub fn new(hash_val: [u8; ID_LEN]) -> Self {
         Self(hash_val)
+    }
+}
+
+impl Serialize for HashPiece {
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for HashPiece {
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct HashPieceVisitor;
+        impl<'de> Visitor<'de> for HashPieceVisitor {
+            type Value = HashPiece;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("`HashPiece`")
+            }
+            fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
+            where
+                E: Error,
+            {
+                if v.len() != ID_LEN {
+                    return Err(Error::custom("v.len not expected".to_string()));
+                }
+
+                let chunk = HashPiece(v[0..20].try_into().unwrap());
+
+                Ok(chunk)
+            }
+        }
+        deserializer.deserialize_bytes(HashPieceVisitor)
     }
 }
 
@@ -125,29 +163,29 @@ impl<'de> Deserialize<'de> for HashPieces {
     where
         D: Deserializer<'de>,
     {
-        struct HashVecVisitor;
-        impl<'de> Visitor<'de> for HashVecVisitor {
+        struct HashPiecesVisitor;
+        impl<'de> Visitor<'de> for HashPiecesVisitor {
             type Value = HashPieces;
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("`HashVec`")
+                formatter.write_str("`HashPieces`")
             }
             fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
             where
                 E: Error,
             {
-                if v.len() % 20 != 0 {
+                if v.len() % ID_LEN != 0 {
                     return Err(Error::custom("v.len not expected".to_string()));
                 }
-                let len = v.len() / 20;
+                let len = v.len() / ID_LEN;
                 let mut hashv: Vec<HashPiece> = Vec::with_capacity(len);
                 for i in 0..len {
-                    let chunk = HashPiece(v[i * 20..i * 20 + 20].try_into().unwrap());
+                    let chunk = HashPiece(v[i * ID_LEN..i * ID_LEN + ID_LEN].try_into().unwrap());
                     hashv.push(chunk)
                 }
                 Ok(HashPieces(hashv))
             }
         }
-        deserializer.deserialize_bytes(HashVecVisitor)
+        deserializer.deserialize_bytes(HashPiecesVisitor)
     }
 }
 

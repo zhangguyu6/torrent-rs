@@ -1,3 +1,4 @@
+use crate::Error;
 use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -7,14 +8,12 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
-use crate::Error;
-
-const V4_LEN: usize = 6;
-const V6_LEN: usize = 18;
+pub(crate) const ADDRESS_V4_LEN: usize = 6;
+pub(crate) const ADDRESS_V6_LEN: usize = 18;
 
 /// IPv6/v4 contact information for a single peer,  see bep_0005 & bep_0032
 #[derive(Debug, Eq, PartialEq)]
-pub struct PeerAddress(SocketAddr);
+pub struct PeerAddress(pub(crate) SocketAddr);
 
 impl FromStr for PeerAddress {
     type Err = Error;
@@ -75,13 +74,13 @@ impl Into<Vec<u8>> for &PeerAddress {
         let port = self.0.port().to_be_bytes();
         match self.0.ip() {
             IpAddr::V4(v4) => {
-                let mut buf = Vec::with_capacity(V4_LEN);
+                let mut buf = Vec::with_capacity(ADDRESS_V4_LEN);
                 buf.extend_from_slice(&v4.octets());
                 buf.extend_from_slice(&port);
                 buf
             }
             IpAddr::V6(v6) => {
-                let mut buf = Vec::with_capacity(V6_LEN);
+                let mut buf = Vec::with_capacity(ADDRESS_V6_LEN);
                 buf.extend_from_slice(&v6.octets());
                 buf.extend_from_slice(&port);
                 buf
@@ -92,12 +91,12 @@ impl Into<Vec<u8>> for &PeerAddress {
 
 impl From<&[u8]> for PeerAddress {
     fn from(v: &[u8]) -> Self {
-        if v.len() == V4_LEN {
+        if v.len() == ADDRESS_V4_LEN {
             let ip_buf: [u8; 4] = v[0..4].try_into().unwrap();
             let ip = Ipv4Addr::from(ip_buf);
             let port = u16::from_be_bytes([v[4], v[5]]);
             PeerAddress(SocketAddr::new(IpAddr::V4(ip), port))
-        } else if v.len() == V6_LEN {
+        } else if v.len() == ADDRESS_V6_LEN {
             let ip_buf: [u8; 16] = v[0..16].try_into().unwrap();
             let ip = Ipv6Addr::from(ip_buf);
             let port = u16::from_be_bytes([v[4], v[5]]);
