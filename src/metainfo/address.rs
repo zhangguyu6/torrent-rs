@@ -107,6 +107,67 @@ impl From<&[u8]> for PeerAddress {
     }
 }
 
+/// Compacted IP-address/port info
+#[derive(Debug, PartialEq, Eq)]
+pub struct CompactAddresses(Vec<PeerAddress>);
+
+impl Serialize for CompactAddresses {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = Vec::new();
+        for addr in self.0.iter() {
+            let node_buf: Vec<u8> = addr.into();
+            buf.extend(node_buf);
+        }
+        serializer.serialize_bytes(&buf)
+    }
+}
+
+impl<'de> Deserialize<'de> for CompactAddresses {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CompactAddressesVisitor;
+        impl<'de> Visitor<'de> for CompactAddressesVisitor {
+            type Value = CompactAddresses;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("`ipv4+port` or `ipv6+port`")
+            }
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() % ADDRESS_V4_LEN != 0 || v.len() % ADDRESS_V6_LEN != 0 {
+                    return Err(de::Error::custom("v.len not expected".to_string()));
+                }
+                if v.len() % ADDRESS_V4_LEN == 0 {
+                    let len = v.len() / ADDRESS_V4_LEN;
+                    let mut addresses = Vec::new();
+                    for i in 0..len {
+                        let addr =
+                            PeerAddress::from(&v[i * ADDRESS_V4_LEN..(i + 1) * ADDRESS_V4_LEN]);
+                        addresses.push(addr);
+                    }
+                    Ok(CompactAddresses(addresses))
+                } else {
+                    let len = v.len() / ADDRESS_V6_LEN;
+                    let mut addresses = Vec::new();
+                    for i in 0..len {
+                        let addr =
+                            PeerAddress::from(&v[i * ADDRESS_V6_LEN..(i + 1) * ADDRESS_V6_LEN]);
+                        addresses.push(addr);
+                    }
+                    Ok(CompactAddresses(addresses))
+                }
+            }
+        }
+        deserializer.deserialize_byte_buf(CompactAddressesVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

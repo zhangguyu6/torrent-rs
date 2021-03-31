@@ -17,6 +17,7 @@ pub struct Deserializer<R> {
     next: Option<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParseResult {
     Bytes,
     Int,

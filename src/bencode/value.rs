@@ -142,6 +142,12 @@ impl From<&str> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(v: String) -> Self {
+        Value::Bytes(v.into())
+    }
+}
+
 impl From<Vec<Value>> for Value {
     fn from(v: Vec<Value>) -> Self {
         Value::List(v)
@@ -676,7 +682,6 @@ impl<'de> Deserializer<'de> for Value {
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         match self {
             Value::Bytes(buf) => {
-                dbg!(&buf);
                 let s = std::str::from_utf8(buf.as_slice())?;
                 visitor.visit_str(s)
             }
@@ -776,24 +781,27 @@ mod tests {
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct A(String);
 
-    fn test_value_ser_de<'de, V: Into<Value>, T: Deserialize<'de> + Serialize + fmt::Debug>(v: V) {
+    fn value_ser_de<'de, V: Into<Value>, T: Deserialize<'de> + Serialize + fmt::Debug>(v: V) {
         let src_value = v.into();
         let t = from_value::<T>(src_value.clone()).unwrap();
-        dbg!(&t);
         let ser_value = to_value(t).unwrap();
         assert_eq!(src_value, ser_value);
     }
 
-    fn test_value_de_ser<'de, T: Deserialize<'de> + Serialize + Eq + fmt::Debug + Clone>(t: T) {
+    fn value_de_ser<'de, T: Deserialize<'de> + Serialize + Eq + fmt::Debug + Clone>(t: T) {
         let v = to_value(t.clone()).unwrap();
         let de_v: T = from_value(v).unwrap();
-        dbg!(&de_v);
         assert_eq!(t, de_v);
     }
 
     #[test]
-    fn test_value_ser() {
-        test_value_ser_de::<i64, i64>(1);
-        test_value_ser_de::<&'static str, A>("1");
+    fn test_value_ser_de() {
+        value_ser_de::<i64, i64>(1);
+        value_ser_de::<String, A>("1".to_string());
+    }
+
+    #[test]
+    fn test_value_de_ser() {
+        value_de_ser::<String>("!".to_string());
     }
 }

@@ -61,7 +61,7 @@ impl From<&[u8]> for Node {
     }
 }
 
-/// Compact IP-address/port info concatenated to the end
+/// Compacted ID/IP-address/port info
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompactNodes(Vec<Node>);
 

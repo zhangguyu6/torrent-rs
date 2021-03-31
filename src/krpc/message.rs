@@ -1,4 +1,5 @@
-use crate::metainfo::{CompactNodes, HashPiece};
+use super::KrpcError;
+use crate::metainfo::{CompactAddresses, CompactNodes, HashPiece};
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -146,10 +147,12 @@ pub struct KrpcResponse {
     /// indentify the queried node, that's, the response node
     id: HashPiece,
     /// found nodes ipv4
+    /// find_node
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     nodes: Option<CompactNodes>,
     /// found nodes ipv6
+    /// find_node
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     nodes6: Option<CompactNodes>,
@@ -158,10 +161,15 @@ pub struct KrpcResponse {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[serde(default)]
     token: String,
+    /// list of the torrent peers
+    /// get_peers
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    values: Option<CompactAddresses>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Message {
+pub struct KrpcMessage {
     /// A string value representing a transaction ID
     t: String,
     /// Type of the message: q for QUERY, r for RESPONSE, e for ERROR
@@ -174,4 +182,39 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     a: Option<KrpcQuery>,
+    /// Named return values
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    r: Option<KrpcResponse>,
+    /// Return error list
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    e: Option<KrpcError>,
+    /// ReadOnly
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    ro: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::bencode::{from_bytes, to_bytes, to_str};
+    #[test]
+    fn test_krpc_error_message() {
+        let message = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Error,
+            q: None,
+            a: None,
+            r: None,
+            e: Some(KrpcError::new(201, "A Generic Error Ocurred")),
+            ro: None,
+        };
+        let buf = b"d1:eli201e23:A Generic Error Ocurrede1:t2:aa1:y1:ee";
+        assert_eq!(to_bytes(&message).unwrap(), buf);
+        dbg!(&to_str(&message).unwrap());
+        assert_eq!(message, from_bytes(buf).unwrap());
+    }
 }
