@@ -13,6 +13,12 @@ pub enum MessageType {
     Error,
 }
 
+impl Default for MessageType {
+    fn default() -> Self {
+        Self::Error
+    }
+}
+
 impl Serialize for MessageType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -105,7 +111,7 @@ impl<'de> Deserialize<'de> for QueryType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpcQuery {
     /// the querying node
     id: HashPiece,
@@ -142,7 +148,7 @@ pub struct KrpcQuery {
 }
 
 /// the results used by the RESPONSE message
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpcResponse {
     /// indentify the queried node, that's, the response node
     id: HashPiece,
@@ -168,7 +174,7 @@ pub struct KrpcResponse {
     values: Option<CompactAddresses>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpcMessage {
     /// A string value representing a transaction ID
     t: String,
@@ -200,21 +206,181 @@ pub struct KrpcMessage {
 mod tests {
 
     use super::*;
-    use crate::bencode::{from_bytes, to_bytes, to_str};
+    use crate::bencode::{from_bytes, to_bytes};
     #[test]
-    fn test_krpc_error_message() {
-        let message = KrpcMessage {
+    fn test_krpc_error() {
+        let error = KrpcMessage {
             t: "aa".to_string(),
             y: MessageType::Error,
-            q: None,
-            a: None,
-            r: None,
             e: Some(KrpcError::new(201, "A Generic Error Ocurred")),
-            ro: None,
+            ..Default::default()
         };
         let buf = b"d1:eli201e23:A Generic Error Ocurrede1:t2:aa1:y1:ee";
-        assert_eq!(to_bytes(&message).unwrap(), buf);
-        dbg!(&to_str(&message).unwrap());
-        assert_eq!(message, from_bytes(buf).unwrap());
+        assert_eq!(to_bytes(&error).unwrap(), buf);
+        assert_eq!(error, from_bytes(buf).unwrap());
+    }
+
+    #[test]
+    fn test_krpc_ping() {
+        let query = KrpcQuery {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            ..Default::default()
+        };
+        let ping_req = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Query,
+            q: Some(QueryType::Ping),
+            a: Some(query),
+            ..Default::default()
+        };
+        let buf = b"d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t2:aa1:y1:qe";
+        assert_eq!(to_bytes(&ping_req).unwrap(), buf);
+        assert_eq!(ping_req, from_bytes(buf).unwrap());
+
+        let rsp = KrpcResponse {
+            id: HashPiece::new(*b"mnopqrstuvwxyz123456"),
+            ..Default::default()
+        };
+        let ping_rsp = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Response,
+            q: None,
+            r: Some(rsp),
+            ..Default::default()
+        };
+
+        let buf = b"d1:rd2:id20:mnopqrstuvwxyz123456e1:t2:aa1:y1:re";
+        assert_eq!(to_bytes(&ping_rsp).unwrap(), buf);
+        assert_eq!(ping_rsp, from_bytes(buf).unwrap());
+    }
+
+    #[test]
+    fn test_krpc_get_peer() {
+        let query = KrpcQuery {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            info_hash: Some(HashPiece::new(*b"mnopqrstuvwxyz123456")),
+            ..Default::default()
+        };
+        let get_peer_req = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Query,
+            q: Some(QueryType::GetPeers),
+            a: Some(query),
+            ..Default::default()
+        };
+        let buf = b"d1:ad2:id20:abcdefghij01234567899:info_hash20:mnopqrstuvwxyz123456e1:q9:get_peers1:t2:aa1:y1:qe";
+        assert_eq!(to_bytes(&get_peer_req).unwrap(), buf);
+        assert_eq!(get_peer_req, from_bytes(buf).unwrap());
+
+        let rsp = KrpcResponse {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            token: "aoeusnth".to_string(),
+            values: Some(vec![b"axje.u", b"idhtnm"].into()),
+            ..Default::default()
+        };
+        let peers_rsp = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Response,
+            q: None,
+            r: Some(rsp),
+            ..Default::default()
+        };
+
+        let buf = b"d1:rd2:id20:abcdefghij01234567895:token8:aoeusnth6:valuesl6:axje.u6:idhtnmee1:t2:aa1:y1:re";
+        assert_eq!(to_bytes(&peers_rsp).unwrap(), buf);
+        assert_eq!(peers_rsp, from_bytes(buf).unwrap());
+
+        let rsp = KrpcResponse {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            token: "aoeusnth".to_string(),
+            nodes: Some(vec![b"12345678901234567890123456"].into()),
+            ..Default::default()
+        };
+        let node_rsp = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Response,
+            q: None,
+            r: Some(rsp),
+            ..Default::default()
+        };
+        let buf =
+            b"d1:rd2:id20:abcdefghij01234567895:nodes26:123456789012345678901234565:token8:aoeusnthe1:t2:aa1:y1:re";
+        assert_eq!(to_bytes(&node_rsp).unwrap(), buf);
+        assert_eq!(node_rsp, from_bytes(buf).unwrap());
+    }
+
+    #[test]
+    fn test_krpc_a() {
+        let query = KrpcQuery {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            target: Some(HashPiece::new(*b"mnopqrstuvwxyz123456")),
+            ..Default::default()
+        };
+        let find_node_req = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Query,
+            q: Some(QueryType::FindNode),
+            a: Some(query),
+            ..Default::default()
+        };
+        let buf = b"d1:ad2:id20:abcdefghij01234567896:target20:mnopqrstuvwxyz123456e1:q9:find_node1:t2:aa1:y1:qe";
+        assert_eq!(to_bytes(&find_node_req).unwrap(), buf);
+        assert_eq!(find_node_req, from_bytes(buf).unwrap());
+
+        let rsp = KrpcResponse {
+            id: HashPiece::new(*b"0123456789abcdefghij"),
+            nodes: Some(vec![b"12345678901234567890123456"].into()),
+            ..Default::default()
+        };
+        let find_node_rsp = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Response,
+            q: None,
+            r: Some(rsp),
+            ..Default::default()
+        };
+
+        let buf =
+            b"d1:rd2:id20:0123456789abcdefghij5:nodes26:12345678901234567890123456e1:t2:aa1:y1:re";
+        assert_eq!(to_bytes(&find_node_rsp).unwrap(), buf);
+        assert_eq!(find_node_rsp, from_bytes(buf).unwrap());
+    }
+
+    #[test]
+    fn test_krpc_announce_peer() {
+        let query = KrpcQuery {
+            id: HashPiece::new(*b"abcdefghij0123456789"),
+            implied_port: Some(true),
+            info_hash: Some(HashPiece::new(*b"mnopqrstuvwxyz123456")),
+            port: Some(6881),
+            token: "aoeusnth".to_string(),
+            ..Default::default()
+        };
+        let announce_peer_node_req = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Query,
+            q: Some(QueryType::AnnouncePeer),
+            a: Some(query),
+            ..Default::default()
+        };
+        let buf = b"d1:ad2:id20:abcdefghij012345678912:implied_porti1e9:info_hash20:mnopqrstuvwxyz1234564:porti6881e5:token8:aoeusnthe1:q13:announce_peer1:t2:aa1:y1:qe";
+        assert_eq!(to_bytes(&announce_peer_node_req).unwrap(), buf);
+        assert_eq!(announce_peer_node_req, from_bytes(buf).unwrap());
+
+        let rsp = KrpcResponse {
+            id: HashPiece::new(*b"mnopqrstuvwxyz123456"),
+            ..Default::default()
+        };
+        let find_node_rsp = KrpcMessage {
+            t: "aa".to_string(),
+            y: MessageType::Response,
+            q: None,
+            r: Some(rsp),
+            ..Default::default()
+        };
+
+        let buf = b"d1:rd2:id20:mnopqrstuvwxyz123456e1:t2:aa1:y1:re";
+        assert_eq!(to_bytes(&find_node_rsp).unwrap(), buf);
+        assert_eq!(find_node_rsp, from_bytes(buf).unwrap());
     }
 }

@@ -11,11 +11,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 pub const NODE_V4_LEN: usize = ADDRESS_V4_LEN + ID_LEN;
 pub const NODE_V6_LEN: usize = ADDRESS_V6_LEN + ID_LEN;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 /// Node Info
 pub struct Node {
-    id: HashPiece,
-    peer_address: PeerAddress,
+    pub id: HashPiece,
+    pub peer_address: PeerAddress,
 }
 
 impl Into<Vec<u8>> for &Node {
@@ -40,8 +40,9 @@ impl Into<Vec<u8>> for &Node {
     }
 }
 
-impl From<&[u8]> for Node {
-    fn from(v: &[u8]) -> Self {
+impl<T: AsRef<[u8]>> From<T> for Node {
+    fn from(v: T) -> Self {
+        let v = v.as_ref();
         let id = HashPiece::new(v[0..ID_LEN].try_into().unwrap());
         let peer_address;
         if v.len() == NODE_V4_LEN {
@@ -64,6 +65,17 @@ impl From<&[u8]> for Node {
 /// Compacted ID/IP-address/port info
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompactNodes(Vec<Node>);
+
+impl<T: IntoIterator<Item: Into<Node>>> From<T> for CompactNodes {
+    fn from(iter: T) -> Self {
+        let mut nodes = vec![];
+        for item in iter.into_iter() {
+            let item: Node = item.into();
+            nodes.push(item);
+        }
+        Self(nodes)
+    }
+}
 
 impl Serialize for CompactNodes {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -94,7 +106,7 @@ impl<'de> Deserialize<'de> for CompactNodes {
             where
                 E: de::Error,
             {
-                if v.len() % NODE_V4_LEN != 0 || v.len() % NODE_V6_LEN != 0 {
+                if v.len() % NODE_V4_LEN != 0 && v.len() % NODE_V6_LEN != 0 {
                     return Err(de::Error::custom("v.len not expected".to_string()));
                 }
                 if v.len() % NODE_V4_LEN == 0 {

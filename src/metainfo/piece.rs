@@ -13,6 +13,8 @@ use smol::{
 };
 use std::convert::TryInto;
 use std::fmt;
+use std::mem::size_of;
+use std::ops::BitXor;
 use std::path::PathBuf;
 use std::result::Result as StdResult;
 use std::usize;
@@ -23,12 +25,51 @@ pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
 pub(crate) const ID_LEN: usize = 20;
 
-#[derive(Debug, PartialEq, Eq, Default, Clone)]
+#[derive(Debug, PartialEq, Eq, Default, Clone, PartialOrd, Ord)]
 pub struct HashPiece([u8; ID_LEN]);
 
 impl HashPiece {
     pub fn new(hash_val: [u8; ID_LEN]) -> Self {
         Self(hash_val)
+    }
+
+    pub(crate) fn leading_zeros(&self) -> usize {
+        let mut zeros = 0;
+        for v in self.0.iter() {
+            zeros += v.leading_zeros() as usize;
+            if *v != 0 {
+                break;
+            }
+        }
+        zeros
+    }
+
+    pub(crate) fn bits(&self) -> usize {
+        ID_LEN * size_of::<u8>() - self.leading_zeros()
+    }
+}
+
+impl BitXor for HashPiece {
+    type Output = HashPiece;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let mut pieces = HashPiece::default();
+        for i in 0..ID_LEN {
+            pieces.0[i] = self.0[i] ^ rhs.0[i];
+        }
+        pieces
+    }
+}
+
+impl BitXor for &HashPiece {
+    type Output = HashPiece;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let mut pieces = HashPiece::default();
+        for i in 0..ID_LEN {
+            pieces.0[i] = self.0[i] ^ rhs.0[i];
+        }
+        pieces
     }
 }
 

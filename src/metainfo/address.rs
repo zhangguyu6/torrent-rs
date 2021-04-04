@@ -1,10 +1,13 @@
+use crate::bencode::Value;
 use crate::Error;
 use serde::{
     de::{self, SeqAccess, Visitor},
+    ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::convert::TryInto;
 use std::fmt;
+use std::iter::IntoIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
@@ -12,7 +15,7 @@ pub(crate) const ADDRESS_V4_LEN: usize = 6;
 pub(crate) const ADDRESS_V6_LEN: usize = 18;
 
 /// IPv6/v4 contact information for a single peer,  see bep_0005 & bep_0032
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct PeerAddress(pub(crate) SocketAddr);
 
 impl FromStr for PeerAddress {
@@ -89,8 +92,9 @@ impl Into<Vec<u8>> for &PeerAddress {
     }
 }
 
-impl From<&[u8]> for PeerAddress {
-    fn from(v: &[u8]) -> Self {
+impl<T: AsRef<[u8]>> From<T> for PeerAddress {
+    fn from(v: T) -> Self {
+        let v = v.as_ref();
         if v.len() == ADDRESS_V4_LEN {
             let ip_buf: [u8; 4] = v[0..4].try_into().unwrap();
             let ip = Ipv4Addr::from(ip_buf);
@@ -111,17 +115,28 @@ impl From<&[u8]> for PeerAddress {
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompactAddresses(Vec<PeerAddress>);
 
+impl<T: IntoIterator<Item: Into<PeerAddress>>> From<T> for CompactAddresses {
+    fn from(iter: T) -> Self {
+        let mut peer_address = vec![];
+        for item in iter.into_iter() {
+            let item: PeerAddress = item.into();
+            peer_address.push(item);
+        }
+        Self(peer_address)
+    }
+}
+
 impl Serialize for CompactAddresses {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut buf = Vec::new();
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
         for addr in self.0.iter() {
             let node_buf: Vec<u8> = addr.into();
-            buf.extend(node_buf);
+            seq.serialize_element(&Value::Bytes(node_buf))?;
         }
-        serializer.serialize_bytes(&buf)
+        seq.end()
     }
 }
 
@@ -136,35 +151,21 @@ impl<'de> Deserialize<'de> for CompactAddresses {
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("`ipv4+port` or `ipv6+port`")
             }
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
-                E: de::Error,
+                A: SeqAccess<'de>,
             {
-                if v.len() % ADDRESS_V4_LEN != 0 || v.len() % ADDRESS_V6_LEN != 0 {
-                    return Err(de::Error::custom("v.len not expected".to_string()));
-                }
-                if v.len() % ADDRESS_V4_LEN == 0 {
-                    let len = v.len() / ADDRESS_V4_LEN;
-                    let mut addresses = Vec::new();
-                    for i in 0..len {
-                        let addr =
-                            PeerAddress::from(&v[i * ADDRESS_V4_LEN..(i + 1) * ADDRESS_V4_LEN]);
-                        addresses.push(addr);
+                let mut addresses = Vec::new();
+                while let Some(v) = seq.next_element::<Value>()? {
+                    match v {
+                        Value::Bytes(buf) => addresses.push(buf.into()),
+                        _ => return Err(de::Error::custom("not bytes")),
                     }
-                    Ok(CompactAddresses(addresses))
-                } else {
-                    let len = v.len() / ADDRESS_V6_LEN;
-                    let mut addresses = Vec::new();
-                    for i in 0..len {
-                        let addr =
-                            PeerAddress::from(&v[i * ADDRESS_V6_LEN..(i + 1) * ADDRESS_V6_LEN]);
-                        addresses.push(addr);
-                    }
-                    Ok(CompactAddresses(addresses))
                 }
+                Ok(CompactAddresses(addresses))
             }
         }
-        deserializer.deserialize_byte_buf(CompactAddressesVisitor)
+        deserializer.deserialize_seq(CompactAddressesVisitor)
     }
 }
 

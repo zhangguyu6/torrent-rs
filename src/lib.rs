@@ -1,3 +1,5 @@
+#![feature(associated_type_bounds)]
+#![feature(btree_drain_filter)]
 mod bencode;
 mod dht;
 mod error;
