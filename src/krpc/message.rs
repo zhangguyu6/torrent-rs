@@ -1,5 +1,8 @@
 use super::KrpcError;
-use crate::metainfo::{CompactAddresses, CompactNodes, HashPiece};
+use crate::{
+    bencode::Value,
+    metainfo::{CompactAddresses, CompactNodes, HashPiece},
+};
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -164,9 +167,9 @@ pub struct KrpcResponse {
     nodes6: Option<CompactNodes>,
     /// used for future "announce_peer"
     /// get_peers
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    token: String,
+    token: Option<Value>,
     /// list of the torrent peers
     /// get_peers
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -274,7 +277,7 @@ mod tests {
 
         let rsp = KrpcResponse {
             id: HashPiece::new(*b"abcdefghij0123456789"),
-            token: "aoeusnth".to_string(),
+            token: Some("aoeusnth".into()),
             values: Some(vec![b"axje.u", b"idhtnm"].into()),
             ..Default::default()
         };
@@ -292,7 +295,7 @@ mod tests {
 
         let rsp = KrpcResponse {
             id: HashPiece::new(*b"abcdefghij0123456789"),
-            token: "aoeusnth".to_string(),
+            token: Some("aoeusnth".into()),
             nodes: Some(vec![b"12345678901234567890123456"].into()),
             ..Default::default()
         };

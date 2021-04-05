@@ -130,6 +130,12 @@ impl<'de> Deserialize<'de> for Value {
     }
 }
 
+impl From<&[u8]> for Value {
+    fn from(v: &[u8]) -> Self {
+        Value::Bytes(v.to_vec())
+    }
+}
+
 impl From<i64> for Value {
     fn from(v: i64) -> Self {
         Value::Integer(v)

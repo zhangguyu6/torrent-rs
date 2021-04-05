@@ -134,6 +134,7 @@ impl RoutingTable {
             .collect()
     }
 
+    /// remove all bad nodes and return questionable nodes in table
     pub fn refresh(&mut self) -> Vec<UpdatedNode> {
         self.buckets
             .iter_mut()
