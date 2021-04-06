@@ -64,7 +64,13 @@ impl<T: AsRef<[u8]>> From<T> for Node {
 
 /// Compacted ID/IP-address/port info
 #[derive(Debug, PartialEq, Eq)]
-pub struct CompactNodes(Vec<Node>);
+pub struct CompactNodes(pub Vec<Node>);
+
+impl Into<Vec<Node>> for CompactNodes {
+    fn into(self) -> Vec<Node> {
+        self.0
+    }
+}
 
 impl<T: IntoIterator<Item: Into<Node>>> From<T> for CompactNodes {
     fn from(iter: T) -> Self {

@@ -1,17 +1,23 @@
-use super::config::DHT_CONFIG;
+use super::config::{DhtConfig, DHT_CONFIG};
 use crate::{bencode::Value, metainfo::PeerAddress};
 use sha1::{Digest, Sha1};
 use std::time::{Duration, SystemTime};
 
+#[derive(Debug)]
 pub struct TokenManager {
     secret: String,
     interval: Duration,
     max_interval_count: usize,
 }
 
+impl Default for TokenManager {
+    fn default() -> Self {
+        Self::new(DHT_CONFIG.read().as_ref().unwrap())
+    }
+}
+
 impl TokenManager {
-    pub fn new() -> Self {
-        let config = DHT_CONFIG.read().unwrap();
+    pub fn new(config: &DhtConfig) -> Self {
         let secret = config.secret.clone();
         let interval = config.token_interval;
         let max_interval_count = config.max_token_interval_count;

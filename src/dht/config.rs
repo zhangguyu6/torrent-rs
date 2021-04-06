@@ -4,14 +4,14 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 lazy_static! {
-    pub(crate) static ref DHT_CONFIG: RwLock<Config> = {
-        let config = Config::default();
+    pub(crate) static ref DHT_CONFIG: RwLock<DhtConfig> = {
+        let config = DhtConfig::default();
         RwLock::new(config)
     };
 }
 
 #[derive(Debug, Default)]
-pub struct Config {
+pub struct DhtConfig {
     /// The size of the bucket of the routing table
     pub k: usize,
     /// Id of the current DHT server node

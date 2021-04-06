@@ -45,6 +45,8 @@ pub enum Error {
     Utf8Err(#[from] Utf8Error),
     #[error("KrpcErr {0}")]
     KrpcErr(KrpcError),
+    #[error("DhtAddrBindErr")]
+    DhtAddrBindErr,
 }
 
 impl ser::Error for Error {
