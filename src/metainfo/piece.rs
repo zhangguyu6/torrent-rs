@@ -25,7 +25,7 @@ pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
 pub(crate) const ID_LEN: usize = 20;
 
-#[derive(Debug, PartialEq, Eq, Default, Clone, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Default, Clone, PartialOrd, Ord, Hash)]
 pub struct HashPiece([u8; ID_LEN]);
 
 impl HashPiece {

@@ -9,6 +9,8 @@ use serde::{
 };
 use std::fmt;
 
+pub const MAX_KRPC_MESSAGE_SIZE: usize = 8192;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     Query,

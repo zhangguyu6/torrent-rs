@@ -2,6 +2,7 @@ use crate::krpc::KrpcError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
 use serde::{de, ser};
+use smol::channel::RecvError;
 use std::net::AddrParseError;
 use std::path::StripPrefixError;
 use std::str::Utf8Error;
@@ -47,6 +48,8 @@ pub enum Error {
     KrpcErr(KrpcError),
     #[error("DhtAddrBindErr")]
     DhtAddrBindErr,
+    #[error("ChannelClosed {0}")]
+    ChannelClosed(#[from] RecvError),
 }
 
 impl ser::Error for Error {

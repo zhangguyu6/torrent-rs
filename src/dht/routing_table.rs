@@ -1,4 +1,4 @@
-use super::config::DHT_CONFIG;
+use super::DHT_CONFIG;
 use crate::metainfo::{HashPiece, Node, ID_LEN};
 use std::mem::size_of;
 use std::time::{Duration, Instant};
