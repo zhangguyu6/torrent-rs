@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::krpc::KrpcMessage;
 use crate::metainfo::{HashPiece, Node, PeerAddress};
-use async_oneshot::{oneshot, Receiver, Sender};
+use smol::channel::{Receiver, Sender};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,10 +30,10 @@ pub(crate) struct Transaction {
 }
 
 impl Transaction {
-    pub fn new(callback: Sender<Result<DhtRsp>>) -> Self {
+    pub fn new(callback: Sender<Result<DhtRsp>>, depth: usize) -> Self {
         Self {
             callback,
-            depth: 0,
+            depth,
             ids: None,
         }
     }

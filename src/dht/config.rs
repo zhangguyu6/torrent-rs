@@ -22,4 +22,9 @@ pub struct DhtConfig {
     pub token_interval: Duration,
     /// How many intervals may pass between the current interval
     pub max_token_interval_count: usize,
+    /// Recursive query limit
+    pub depth: usize,
+    /// If true, the port argument should be ignored,
+    /// and the source port of the UDP packet should be used
+    pub implied_port: bool,
 }

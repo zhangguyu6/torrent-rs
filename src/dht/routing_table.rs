@@ -124,10 +124,10 @@ impl RoutingTable {
         bucket.insert(node)
     }
 
-    pub fn closest(&self, target: HashPiece, max: usize) -> Vec<UpdatedNode> {
+    pub fn closest(&self, target: &HashPiece, max: usize) -> Vec<UpdatedNode> {
         let mut nodes: Vec<(&HashPiece, &UpdatedNode)> =
             self.buckets.iter().flat_map(|b| &b.nodes).collect();
-        nodes.sort_by_key(|(k, _)| (*k) ^ &target);
+        nodes.sort_by_key(|(k, _)| (*k) ^ target);
         nodes[0..cmp::min(max, nodes.len())]
             .iter()
             .map(|(_, v)| (*v).clone())

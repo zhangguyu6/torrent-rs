@@ -116,95 +116,95 @@ impl<'de> Deserialize<'de> for QueryType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default, Clone)]
 pub struct KrpcQuery {
     /// the querying node
-    id: HashPiece,
+    pub id: HashPiece,
     /// the node sought by the queryer
     /// find_node
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    target: Option<HashPiece>,
+    pub target: Option<HashPiece>,
     /// the infohash of the torrent
     /// get_peers
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    info_hash: Option<HashPiece>,
+    pub info_hash: Option<HashPiece>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    port: Option<u16>,
+    pub port: Option<u16>,
     /// received one from an earlier "get_peers" query
     /// announce_peer
     #[serde(skip_serializing_if = "String::is_empty")]
     #[serde(default)]
-    token: String,
+    pub token: String,
     /// If it is present and non-zero, the port argument should be ignored
     /// and the source port of the UDP packet should be used as the peer's port instead
     /// announce_peer
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    implied_port: Option<bool>,
+    pub implied_port: Option<bool>,
     /// Containing one or both of the strings "n4" or "n6"
     /// "n4": the node requests the presence of a "nodes" key
     /// "n6": the node requests the presence of a "nodes6" key
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
-    want: Vec<String>,
+    pub want: Vec<String>,
 }
 
 /// the results used by the RESPONSE message
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpcResponse {
     /// indentify the queried node, that's, the response node
-    id: HashPiece,
+    pub id: HashPiece,
     /// found nodes ipv4
     /// find_node
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    nodes: Option<CompactNodes>,
+    pub nodes: Option<CompactNodes>,
     /// found nodes ipv6
     /// find_node
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    nodes6: Option<CompactNodes>,
+    pub nodes6: Option<CompactNodes>,
     /// used for future "announce_peer"
     /// get_peers
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    token: Option<Value>,
+    pub token: Option<Value>,
     /// list of the torrent peers
     /// get_peers
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    values: Option<CompactAddresses>,
+    pub values: Option<CompactAddresses>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KrpcMessage {
     /// A string value representing a transaction ID
-    t: String,
+    pub t: String,
     /// Type of the message: q for QUERY, r for RESPONSE, e for ERROR
-    y: MessageType,
+    pub y: MessageType,
     /// Query method (one of 4: "ping", "find_node", "get_peers", "announce_peer")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    q: Option<QueryType>,
+    pub q: Option<QueryType>,
     /// Named arguments sent with a query
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    a: Option<KrpcQuery>,
+    pub a: Option<KrpcQuery>,
     /// Named return values
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    r: Option<KrpcResponse>,
+    pub r: Option<KrpcResponse>,
     /// Return error list
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    e: Option<KrpcError>,
+    pub e: Option<KrpcError>,
     /// ReadOnly
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    ro: Option<bool>,
+    pub ro: Option<bool>,
 }
 
 #[cfg(test)]
