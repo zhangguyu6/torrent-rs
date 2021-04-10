@@ -15,7 +15,7 @@ pub(crate) const ADDRESS_V4_LEN: usize = 6;
 pub(crate) const ADDRESS_V6_LEN: usize = 18;
 
 /// IPv6/v4 contact information for a single peer,  see bep_0005 & bep_0032
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct PeerAddress(pub(crate) SocketAddr);
 
 impl FromStr for PeerAddress {
@@ -113,7 +113,7 @@ impl<T: AsRef<[u8]>> From<T> for PeerAddress {
 
 /// Compacted IP-address/port info
 #[derive(Debug, PartialEq, Eq)]
-pub struct CompactAddresses(Vec<PeerAddress>);
+pub struct CompactAddresses(pub(crate) Vec<PeerAddress>);
 
 impl<T: IntoIterator<Item: Into<PeerAddress>>> From<T> for CompactAddresses {
     fn from(iter: T) -> Self {

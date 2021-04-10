@@ -1,6 +1,8 @@
 use super::config::{DhtConfig, DHT_CONFIG};
-use crate::{bencode::Value, metainfo::PeerAddress};
+use crate::bencode::Value;
+use crate::metainfo::{HashPiece, PeerAddress};
 use sha1::{Digest, Sha1};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 #[derive(Debug)]
@@ -8,6 +10,7 @@ pub struct TokenManager {
     secret: String,
     interval: Duration,
     max_interval_count: usize,
+    token_m: HashMap<HashPiece, Value>,
 }
 
 impl Default for TokenManager {
@@ -25,8 +28,18 @@ impl TokenManager {
             secret,
             interval,
             max_interval_count,
+            token_m: HashMap::new(),
         }
     }
+
+    pub fn get_token(&self, id: &HashPiece) -> Option<&Value> {
+        self.token_m.get(id)
+    }
+
+    pub fn insert_token(&mut self, id: HashPiece, token: Value) -> Option<Value> {
+        self.token_m.insert(id, token)
+    }
+
     pub fn create_token(&self, now: Option<SystemTime>, node: &PeerAddress) -> Value {
         let mut hasher = Sha1::new();
         let ip_buf: Vec<u8> = node.into();
@@ -42,6 +55,7 @@ impl TokenManager {
         let v: [u8; 20] = hasher.finalize().into();
         (&v[..]).into()
     }
+
     pub fn valid_token(&self, token: Value, node: &PeerAddress) -> bool {
         let mut now = SystemTime::now();
         for _ in 0..self.max_interval_count + 1 {

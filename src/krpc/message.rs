@@ -135,9 +135,9 @@ pub struct KrpcQuery {
     pub port: Option<u16>,
     /// received one from an earlier "get_peers" query
     /// announce_peer
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub token: String,
+    pub token: Option<Value>,
     /// If it is present and non-zero, the port argument should be ignored
     /// and the source port of the UDP packet should be used as the peer's port instead
     /// announce_peer
@@ -358,7 +358,7 @@ mod tests {
             implied_port: Some(true),
             info_hash: Some(HashPiece::new(*b"mnopqrstuvwxyz123456")),
             port: Some(6881),
-            token: "aoeusnth".to_string(),
+            token: Some("aoeusnth".into()),
             ..Default::default()
         };
         let announce_peer_node_req = KrpcMessage {

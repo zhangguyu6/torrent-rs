@@ -49,7 +49,11 @@ pub enum Error {
     #[error("DhtAddrBindErr")]
     DhtAddrBindErr,
     #[error("ChannelClosed {0}")]
-    ChannelClosed(#[from] RecvError),
+    ChannelRecvErr(#[from] RecvError),
+    #[error("ProtocolErr")]
+    ProtocolErr,
+    #[error("Transaction {0} not found, maybe timeout")]
+    TransactionNotFound(usize),
 }
 
 impl ser::Error for Error {

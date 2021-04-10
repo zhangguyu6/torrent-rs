@@ -1,19 +1,20 @@
-use super::{DhtConfig, DhtMessage, DhtReq, DhtRsp, RoutingTable, TokenManager, Transaction};
+use super::{
+    DhtConfig, DhtMessage, DhtReq, DhtRsp, RoutingTable, TokenManager, Transaction, UpdatedNode,
+};
 use crate::bencode::{from_bytes, to_bytes};
 use crate::error::{Error, Result};
-use crate::krpc::{KrpcMessage, KrpcQuery, MessageType, QueryType, MAX_KRPC_MESSAGE_SIZE};
-use crate::metainfo::HashPiece;
-use crate::metainfo::PeerAddress;
+use crate::krpc::{
+    KrpcMessage, KrpcQuery, KrpcResponse, MessageType, QueryType, MAX_KRPC_MESSAGE_SIZE,
+};
+use crate::metainfo::{HashPiece, Node, PeerAddress};
 use log::{debug, error};
 use smol::{
     channel::{unbounded, Receiver, Sender},
     future::or,
     net::{AsyncToSocketAddrs, UdpSocket},
 };
-use std::{
-    collections::HashMap,
-    net::{IpAddr, SocketAddr},
-};
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 
 pub struct DhtServer {
     addr: SocketAddr,
@@ -85,14 +86,44 @@ impl DhtServer {
         unimplemented!()
     }
 
+    fn insert_node(&mut self, node: UpdatedNode) -> bool {
+        let mut existed = false;
+        if node.node.peer_address.0.is_ipv4() {
+            if self.support_ipv4 {
+                if let Some(_) = self.routing_table4.insert(node.clone()) {
+                    existed = true;
+                }
+            }
+        }
+        if node.node.peer_address.0.is_ipv6() {
+            if self.support_ipv6 {
+                if let Some(_) = self.routing_table6.insert(node.clone()) {
+                    existed = true;
+                }
+            }
+        }
+        existed
+    }
+
+    fn get_closest_nodes(&self, hash_piece: &HashPiece) -> Vec<UpdatedNode> {
+        let mut nodes = Vec::with_capacity(self.k);
+        if self.support_ipv4 {
+            nodes.extend(self.routing_table4.closest(hash_piece, self.k));
+        }
+        if self.support_ipv6 {
+            nodes.extend(self.routing_table6.closest(hash_piece, self.k));
+        }
+        nodes
+    }
+
     async fn receiver_req(&self) -> Result<DhtMessage> {
         Ok(self.receiver.recv().await?)
     }
 
     async fn receiver_rsp(&self, buf: &mut [u8]) -> Result<DhtMessage> {
-        let size = self.socket.recv(buf).await?;
+        let (size, addr) = self.socket.recv_from(buf).await?;
         let krpc_message = from_bytes(&buf[0..size])?;
-        Ok(DhtMessage::Rsp(krpc_message))
+        Ok(DhtMessage::Rsp(krpc_message, addr))
     }
 
     async fn send_krpc_message(
@@ -114,30 +145,23 @@ impl DhtServer {
         Ok(())
     }
 
-    async fn send_ping(
-        &mut self,
-        seq: usize,
-        addr: PeerAddress,
-        cb: Sender<Result<DhtRsp>>,
-    ) -> Result<()> {
+    async fn send_ping(&mut self, addr: PeerAddress, tran: Transaction) -> Result<()> {
+        self.seq += 1;
         let message = KrpcMessage {
-            t: seq.to_string(),
+            t: self.seq.to_string(),
             y: MessageType::Query,
             q: Some(QueryType::Ping),
             ..Default::default()
         };
-        let transaction = Transaction::new(cb, 0);
-        self.callback_map.insert(self.seq, transaction);
-        self.seq += 1;
+        self.callback_map.insert(self.seq, tran);
         self.send_krpc_message(message, addr).await
     }
 
     async fn send_find_node(
         &mut self,
-        seq: usize,
         addr: PeerAddress,
-        id: HashPiece,
-        cb: Sender<Result<DhtRsp>>,
+        target: HashPiece,
+        tran: Transaction,
     ) -> Result<()> {
         let mut want = Vec::new();
         if self.support_ipv4 {
@@ -147,36 +171,28 @@ impl DhtServer {
             want.push("n6".to_string());
         }
         let query = KrpcQuery {
-            target: Some(id),
+            target: Some(target.clone()),
             want,
             ..Default::default()
         };
+        self.seq += 1;
         let message = KrpcMessage {
-            t: seq.to_string(),
+            t: self.seq.to_string(),
             y: MessageType::Query,
             q: Some(QueryType::FindNode),
             a: Some(query),
             ..Default::default()
         };
-        let transaction = Transaction::new(cb, self.depth);
-        self.callback_map.insert(self.seq, transaction);
-        self.seq += 1;
+        self.callback_map.insert(self.seq, tran);
         self.send_krpc_message(message, addr).await
     }
 
     async fn send_get_peers(
         &mut self,
-        seq: usize,
+        node: Node,
         info_hash: HashPiece,
-        cb: Sender<Result<DhtRsp>>,
+        tran: Transaction,
     ) -> Result<()> {
-        let mut nodes = Vec::with_capacity(self.k);
-        if self.support_ipv4 {
-            nodes.extend(self.routing_table4.closest(&info_hash, self.k));
-        }
-        if self.support_ipv6 {
-            nodes.extend(self.routing_table6.closest(&info_hash, self.k));
-        }
         let mut want = Vec::new();
         if self.support_ipv4 {
             want.push("n4".to_string());
@@ -189,36 +205,25 @@ impl DhtServer {
             want,
             ..Default::default()
         };
-        for node in nodes.drain(..) {
-            let message = KrpcMessage {
-                t: seq.to_string(),
-                y: MessageType::Query,
-                q: Some(QueryType::GetPeers),
-                a: Some(query.clone()),
-                ..Default::default()
-            };
-            let transaction = Transaction::new(cb.clone(), self.depth);
-            self.callback_map.insert(self.seq, transaction);
-            self.seq += 1;
-            self.send_krpc_message(message, node.node.peer_address)
-                .await?;
-        }
+        self.seq += 1;
+        let message = KrpcMessage {
+            t: self.seq.to_string(),
+            y: MessageType::Query,
+            q: Some(QueryType::GetPeers),
+            a: Some(query.clone()),
+            ..Default::default()
+        };
+        self.callback_map.insert(self.seq, tran.clone());
+        self.send_krpc_message(message, node.peer_address).await?;
         Ok(())
     }
 
     async fn send_announce_peer(
         &mut self,
-        seq: usize,
+        node: Node,
         info_hash: HashPiece,
-        cb: Sender<Result<DhtRsp>>,
+        tran: Transaction,
     ) -> Result<()> {
-        let mut nodes = Vec::with_capacity(self.k);
-        if self.support_ipv4 {
-            nodes.extend(self.routing_table4.closest(&info_hash, self.k));
-        }
-        if self.support_ipv6 {
-            nodes.extend(self.routing_table6.closest(&info_hash, self.k));
-        }
         let mut want = Vec::new();
         if self.support_ipv4 {
             want.push("n4".to_string());
@@ -226,7 +231,7 @@ impl DhtServer {
         if self.support_ipv6 {
             want.push("n6".to_string());
         }
-        let query = KrpcQuery {
+        let mut query = KrpcQuery {
             info_hash: Some(info_hash),
             implied_port: if !self.implied_port {
                 None
@@ -237,20 +242,159 @@ impl DhtServer {
             want,
             ..Default::default()
         };
-        for node in nodes.drain(..) {
+        if let Some(token) = self.token_manager.get_token(&node.id) {
+            self.seq += 1;
+            query.token = Some(token.clone());
             let message = KrpcMessage {
-                t: seq.to_string(),
+                t: self.seq.to_string(),
                 y: MessageType::Query,
                 q: Some(QueryType::AnnouncePeer),
                 a: Some(query.clone()),
                 ..Default::default()
             };
-            let transaction = Transaction::new(cb.clone(), self.depth);
-            self.callback_map.insert(self.seq, transaction);
-            self.seq += 1;
-            self.send_krpc_message(message, node.node.peer_address)
-                .await?;
+            self.callback_map.insert(self.seq, tran.clone());
+            self.send_krpc_message(message, node.peer_address).await?;
         }
+        Ok(())
+    }
+
+    async fn on_error(&mut self, mut message: KrpcMessage) -> Result<()> {
+        let e = message.e.take().ok_or(Error::ProtocolErr)?;
+        let err = Error::KrpcErr(e);
+        let tran_id: usize = message.t.parse()?;
+        let tran = self
+            .callback_map
+            .remove(&tran_id)
+            .ok_or(Error::TransactionNotFound(tran_id))?;
+        // ignore if client dropped
+        let _ = tran.callback.send(Err(err)).await;
+        Ok(())
+    }
+
+    async fn on_response(&mut self, mut message: KrpcMessage, addr: SocketAddr) -> Result<()> {
+        let tran_id: usize = message.t.parse()?;
+        let tran = self
+            .callback_map
+            .remove(&tran_id)
+            .ok_or(Error::TransactionNotFound(tran_id))?;
+        let rsp = message.r.take().ok_or(Error::ProtocolErr)?;
+        if message.ro != Some(true) {
+            self.insert_node(UpdatedNode::new_id_addr(rsp.id.clone(), addr));
+        }
+        match tran.query_type {
+            QueryType::Ping => {
+                self.on_ping_rsp(rsp, tran).await?;
+            }
+            QueryType::FindNode => {
+                self.on_find_node_rsp(rsp, tran).await?;
+            }
+            QueryType::GetPeers => {
+                if let Some(token) = rsp.token.clone() {
+                    self.token_manager.insert_token(rsp.id.clone(), token);
+                }
+                self.on_get_peers_rsp(rsp, tran).await?;
+            }
+            QueryType::AnnouncePeer => {}
+        }
+        Ok(())
+    }
+
+    async fn on_ping_rsp(&mut self, _: KrpcResponse, tran: Transaction) -> Result<()> {
+        let _ = tran.callback.send(Ok(DhtRsp::Pong));
+        Ok(())
+    }
+
+    async fn on_find_node_rsp(
+        &mut self,
+        mut rsp: KrpcResponse,
+        mut tran: Transaction,
+    ) -> Result<()> {
+        tran.depth -= 1;
+        let mut find_node = None;
+        let mut nodes = rsp.nodes.take().map(|n| n.0).unwrap_or_default();
+        let mut node6s = rsp.nodes6.take().map(|n| n.0).unwrap_or_default();
+        for n in nodes.drain(..) {
+            if tran.contain_id(&n.id) {
+                continue;
+            }
+            tran.insert_id(n.id.clone());
+            if &n.id == tran.target.as_ref().unwrap() {
+                find_node = Some(n.clone());
+            }
+            if self.support_ipv4
+                && !self.insert_node(UpdatedNode::new(n.clone()))
+                && find_node.is_none()
+                && tran.depth > 0
+            {
+                self.send_find_node(n.peer_address, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
+            }
+        }
+        for n in node6s.drain(..) {
+            if tran.contain_id(&n.id) {
+                continue;
+            }
+            tran.insert_id(n.id.clone());
+            if &n.id == tran.target.as_ref().unwrap() {
+                find_node = Some(n.clone());
+            }
+            if self.support_ipv6
+                && !self.insert_node(UpdatedNode::new(n.clone()))
+                && find_node.is_none()
+                && tran.depth > 0
+            {
+                self.send_find_node(n.peer_address, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
+            }
+        }
+        if find_node.is_some() {
+            let _ = tran.callback.send(Ok(DhtRsp::FindNode(find_node)));
+        }
+        Ok(())
+    }
+
+    async fn on_get_peers_rsp(
+        &mut self,
+        mut rsp: KrpcResponse,
+        mut tran: Transaction,
+    ) -> Result<()> {
+        let _ = tran.callback.send(Ok(DhtRsp::Pong));
+        if let Some(mut addrs) = rsp.values.take() {
+            for addr in addrs.0.drain(..) {
+                let _ = tran.callback.send(Ok(DhtRsp::GetPeers(addr)));
+            }
+            return Ok(());
+        }
+        tran.depth -= 1;
+        let mut nodes = rsp.nodes.take().map(|n| n.0).unwrap_or_default();
+        let mut node6s = rsp.nodes6.take().map(|n| n.0).unwrap_or_default();
+        for n in nodes.drain(..) {
+            if tran.contain_id(&n.id) {
+                continue;
+            }
+            tran.insert_id(n.id.clone());
+            if self.support_ipv4 && !self.insert_node(UpdatedNode::new(n.clone())) && tran.depth > 0
+            {
+                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
+            }
+        }
+        for n in node6s.drain(..) {
+            if tran.contain_id(&n.id) {
+                continue;
+            }
+            tran.insert_id(n.id.clone());
+            if self.support_ipv6 && !self.insert_node(UpdatedNode::new(n.clone())) && tran.depth > 0
+            {
+                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn on_announce_rsp(&mut self, _: KrpcResponse, tran: Transaction) -> Result<()> {
+        let _ = tran.callback.send(Ok(DhtRsp::Announced));
         Ok(())
     }
 
@@ -258,24 +402,48 @@ impl DhtServer {
         match or(self.receiver_req(), self.receiver_rsp(buf)).await {
             Ok(DhtMessage::Req(req, cb)) => match req {
                 DhtReq::ShutDown => {
-                    let _ = cb.send(Ok(DhtRsp::Done));
+                    let _ = cb.send(Ok(DhtRsp::ShutDown));
                     return Ok(true);
                 }
                 DhtReq::Ping(addr) => {
-                    self.send_ping(self.seq, addr, cb).await?;
+                    self.send_ping(addr, Transaction::new(cb, 0, QueryType::Ping, None))
+                        .await?;
                 }
-                DhtReq::FindNode(addr, id) => {
-                    self.send_find_node(self.seq, addr, id, cb).await?;
+                DhtReq::FindNode(addr, target) => {
+                    self.send_find_node(
+                        addr,
+                        target.clone(),
+                        Transaction::new(cb, self.depth, QueryType::FindNode, Some(target)),
+                    )
+                    .await?;
                 }
-                DhtReq::GetPeers(id) => {
-                    self.send_get_peers(self.seq, id, cb).await?;
+                DhtReq::GetPeers(info_hash) => {
+                    let tran = Transaction::new(
+                        cb,
+                        self.depth,
+                        QueryType::GetPeers,
+                        Some(info_hash.clone()),
+                    );
+                    for n in self.get_closest_nodes(&info_hash) {
+                        self.send_get_peers(n.node, info_hash.clone(), tran.clone())
+                            .await?;
+                    }
                 }
-                DhtReq::AnnouncePeer(id) => {
-                    self.send_announce_peer(self.seq, id, cb).await?;
+                DhtReq::AnnouncePeer(info_hash) => {
+                    let tran =
+                        Transaction::new(cb.clone(), self.depth, QueryType::AnnouncePeer, None);
+                    for n in self.get_closest_nodes(&info_hash) {
+                        self.send_announce_peer(n.node, info_hash.clone(), tran.clone())
+                            .await?;
+                    }
                 }
             },
-            Ok(DhtMessage::Rsp(rsp)) => {}
-            Err(Error::ChannelClosed(_)) => return Ok(true),
+            Ok(DhtMessage::Rsp(rsp, addr)) => match rsp.y {
+                MessageType::Query => unreachable!(),
+                MessageType::Error => self.on_error(rsp).await?,
+                MessageType::Response => self.on_response(rsp, addr).await?,
+            },
+            Err(Error::ChannelRecvErr(_)) => return Ok(true),
             Err(e) => return Err(e),
         }
         Ok(false)

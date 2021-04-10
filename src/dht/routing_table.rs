@@ -1,8 +1,10 @@
 use super::DHT_CONFIG;
-use crate::metainfo::{HashPiece, Node, ID_LEN};
+use crate::metainfo::{HashPiece, Node, PeerAddress, ID_LEN};
+use std::cmp;
+use std::collections::BTreeMap;
 use std::mem::size_of;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::{cmp, collections::BTreeMap};
 
 /// After 15 minutes of inactivity, a node becomes questionable
 pub const QUESTIONABLE_TIMEOUT: u64 = 15 * 60;
@@ -23,11 +25,18 @@ pub struct UpdatedNode {
 }
 
 impl UpdatedNode {
-    fn new(node: Node) -> Self {
+    pub fn new(node: Node) -> Self {
         Self {
             last_updated: Instant::now(),
             node: node,
         }
+    }
+    pub fn new_id_addr(id: HashPiece, addr: SocketAddr) -> Self {
+        let update_node = UpdatedNode::new(Node {
+            id,
+            peer_address: PeerAddress(addr),
+        });
+        update_node
     }
 
     fn state(&self, now: Option<Instant>) -> NodeState {

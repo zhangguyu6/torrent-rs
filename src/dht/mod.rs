@@ -6,5 +6,5 @@ mod token;
 
 use config::{DhtConfig, DHT_CONFIG};
 use protocol::{DhtMessage, DhtReq, DhtRsp, Transaction};
-use routing_table::RoutingTable;
+use routing_table::{RoutingTable, UpdatedNode};
 use token::TokenManager;
