@@ -1,5 +1,6 @@
 use super::{
-    DhtConfig, DhtMessage, DhtReq, DhtRsp, RoutingTable, TokenManager, Transaction, UpdatedNode,
+    DhtConfig, DhtMessage, DhtReq, DhtRsp, MemPeerStore, PeerStore, RoutingTable, TokenManager,
+    Transaction, UpdatedNode,
 };
 use crate::bencode::{from_bytes, to_bytes};
 use crate::error::{Error, Result};
@@ -16,7 +17,7 @@ use smol::{
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 
-pub struct DhtServer {
+pub struct DhtServer<S = MemPeerStore> {
     addr: SocketAddr,
     id: HashPiece,
     support_ipv4: bool,
@@ -31,10 +32,15 @@ pub struct DhtServer {
     callback_map: HashMap<usize, Transaction>,
     k: usize,
     implied_port: bool,
+    peer_store: S,
 }
 
-impl DhtServer {
-    async fn new<A: AsyncToSocketAddrs>(addr: A, config: &DhtConfig) -> Result<(Self, DhtClient)> {
+impl<S: PeerStore> DhtServer<S> {
+    async fn new<A: AsyncToSocketAddrs>(
+        addr: A,
+        config: &DhtConfig,
+        store: S,
+    ) -> Result<(Self, DhtClient)> {
         let addr = addr
             .to_socket_addrs()
             .await?
@@ -77,6 +83,7 @@ impl DhtServer {
                 depth,
                 k,
                 implied_port,
+                peer_store: store,
             },
             DhtClient { sender },
         ))
@@ -123,13 +130,13 @@ impl DhtServer {
     async fn receiver_rsp(&self, buf: &mut [u8]) -> Result<DhtMessage> {
         let (size, addr) = self.socket.recv_from(buf).await?;
         let krpc_message = from_bytes(&buf[0..size])?;
-        Ok(DhtMessage::Rsp(krpc_message, addr))
+        Ok(DhtMessage::Message(krpc_message, addr))
     }
 
     async fn send_krpc_message(
         &mut self,
         mut message: KrpcMessage,
-        addr: PeerAddress,
+        addr: SocketAddr,
     ) -> Result<()> {
         match message.a.as_mut() {
             Some(query) => query.id = self.id.clone(),
@@ -141,7 +148,7 @@ impl DhtServer {
             }
         }
         let mut buf = to_bytes(&message)?;
-        self.socket.send_to(&mut buf, addr.0).await?;
+        self.socket.send_to(&mut buf, addr).await?;
         Ok(())
     }
 
@@ -154,7 +161,7 @@ impl DhtServer {
             ..Default::default()
         };
         self.callback_map.insert(self.seq, tran);
-        self.send_krpc_message(message, addr).await
+        self.send_krpc_message(message, addr.0).await
     }
 
     async fn send_find_node(
@@ -184,7 +191,7 @@ impl DhtServer {
             ..Default::default()
         };
         self.callback_map.insert(self.seq, tran);
-        self.send_krpc_message(message, addr).await
+        self.send_krpc_message(message, addr.0).await
     }
 
     async fn send_get_peers(
@@ -214,7 +221,7 @@ impl DhtServer {
             ..Default::default()
         };
         self.callback_map.insert(self.seq, tran.clone());
-        self.send_krpc_message(message, node.peer_address).await?;
+        self.send_krpc_message(message, node.peer_address.0).await?;
         Ok(())
     }
 
@@ -253,7 +260,7 @@ impl DhtServer {
                 ..Default::default()
             };
             self.callback_map.insert(self.seq, tran.clone());
-            self.send_krpc_message(message, node.peer_address).await?;
+            self.send_krpc_message(message, node.peer_address.0).await?;
         }
         Ok(())
     }
@@ -282,19 +289,15 @@ impl DhtServer {
             self.insert_node(UpdatedNode::new_id_addr(rsp.id.clone(), addr));
         }
         match tran.query_type {
-            QueryType::Ping => {
-                self.on_ping_rsp(rsp, tran).await?;
-            }
-            QueryType::FindNode => {
-                self.on_find_node_rsp(rsp, tran).await?;
-            }
+            QueryType::Ping => self.on_ping_rsp(rsp, tran).await?,
+            QueryType::FindNode => self.on_find_node_rsp(rsp, tran).await?,
             QueryType::GetPeers => {
                 if let Some(token) = rsp.token.clone() {
                     self.token_manager.insert_token(rsp.id.clone(), token);
                 }
                 self.on_get_peers_rsp(rsp, tran).await?;
             }
-            QueryType::AnnouncePeer => {}
+            QueryType::AnnouncePeer => self.on_announce_rsp(rsp, tran).await?,
         }
         Ok(())
     }
@@ -398,6 +401,43 @@ impl DhtServer {
         Ok(())
     }
 
+    async fn on_query(&mut self, message: KrpcMessage, addr: SocketAddr) -> Result<()> {
+        let query_t = message.q.ok_or(Error::ProtocolErr)?;
+        let query = message.a.ok_or(Error::ProtocolErr)?;
+        match query_t {
+            QueryType::Ping => self.on_ping_query(query, message.t, addr).await?,
+            QueryType::FindNode => {}
+            QueryType::GetPeers => {}
+            QueryType::AnnouncePeer => {}
+        }
+        unimplemented!()
+    }
+
+    async fn on_ping_query(
+        &mut self,
+        req: KrpcQuery,
+        tran_id: String,
+        mut addr: SocketAddr,
+    ) -> Result<()> {
+        let rsp = KrpcResponse {
+            id: self.id.clone(),
+            ..Default::default()
+        };
+        let message = KrpcMessage {
+            t: tran_id,
+            y: MessageType::Response,
+            r: Some(rsp),
+            ..Default::default()
+        };
+        if req.implied_port.is_none() {
+            if let Some(port) = req.port {
+                addr.set_port(port);
+            }
+        }
+        self.send_krpc_message(message, addr).await?;
+        Ok(())
+    }
+
     async fn handle(&mut self, buf: &mut [u8]) -> Result<bool> {
         match or(self.receiver_req(), self.receiver_rsp(buf)).await {
             Ok(DhtMessage::Req(req, cb)) => match req {
@@ -438,10 +478,10 @@ impl DhtServer {
                     }
                 }
             },
-            Ok(DhtMessage::Rsp(rsp, addr)) => match rsp.y {
-                MessageType::Query => unreachable!(),
-                MessageType::Error => self.on_error(rsp).await?,
-                MessageType::Response => self.on_response(rsp, addr).await?,
+            Ok(DhtMessage::Message(message, addr)) => match message.y {
+                MessageType::Query => self.on_query(message, addr).await?,
+                MessageType::Error => self.on_error(message).await?,
+                MessageType::Response => self.on_response(message, addr).await?,
             },
             Err(Error::ChannelRecvErr(_)) => return Ok(true),
             Err(e) => return Err(e),
@@ -449,7 +489,7 @@ impl DhtServer {
         Ok(false)
     }
 
-    async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let mut buf = [0; MAX_KRPC_MESSAGE_SIZE];
         loop {
             match self.handle(&mut buf).await {

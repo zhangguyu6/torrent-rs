@@ -11,8 +11,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 pub const NODE_V4_LEN: usize = ADDRESS_V4_LEN + ID_LEN;
 pub const NODE_V6_LEN: usize = ADDRESS_V6_LEN + ID_LEN;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
 /// Node Info
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Node {
     pub id: HashPiece,
     pub peer_address: PeerAddress,
