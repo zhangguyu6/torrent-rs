@@ -43,6 +43,7 @@ impl PeerStore for MemPeerStore {
         nodes.insert(node.id);
         Ok(())
     }
+
     fn remove(&mut self, id: &HashPiece) -> Result<Option<Node>> {
         if let Some((node, mut infos)) = self.node_to_info.remove(id) {
             for info in infos.drain() {
@@ -54,6 +55,7 @@ impl PeerStore for MemPeerStore {
         }
         Ok(None)
     }
+
     fn get(&self, info_hash: &HashPiece, max: usize) -> Result<Vec<Node>> {
         let mut nodes = Vec::new();
         if let Some(ids) = self.info_to_node.get(info_hash) {

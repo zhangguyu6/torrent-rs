@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::krpc::{
     KrpcMessage, KrpcQuery, KrpcResponse, MessageType, QueryType, MAX_KRPC_MESSAGE_SIZE,
 };
-use crate::metainfo::{HashPiece, Node, PeerAddress};
+use crate::metainfo::{CompactAddresses, CompactNodes, HashPiece, Node, PeerAddress};
 use log::{debug, error};
 use smol::{
     channel::{unbounded, Receiver, Sender},
@@ -154,14 +154,20 @@ impl<S: PeerStore> DhtServer<S> {
 
     async fn send_ping(&mut self, addr: PeerAddress, tran: Transaction) -> Result<()> {
         self.seq += 1;
+        let query = KrpcQuery {
+            id: self.id.clone(),
+            ..Default::default()
+        };
         let message = KrpcMessage {
             t: self.seq.to_string(),
             y: MessageType::Query,
             q: Some(QueryType::Ping),
+            a: Some(query),
             ..Default::default()
         };
+        self.send_krpc_message(message, addr.0).await?;
         self.callback_map.insert(self.seq, tran);
-        self.send_krpc_message(message, addr.0).await
+        Ok(())
     }
 
     async fn send_find_node(
@@ -178,6 +184,7 @@ impl<S: PeerStore> DhtServer<S> {
             want.push("n6".to_string());
         }
         let query = KrpcQuery {
+            id: self.id.clone(),
             target: Some(target.clone()),
             want,
             ..Default::default()
@@ -190,8 +197,9 @@ impl<S: PeerStore> DhtServer<S> {
             a: Some(query),
             ..Default::default()
         };
+        self.send_krpc_message(message, addr.0).await?;
         self.callback_map.insert(self.seq, tran);
-        self.send_krpc_message(message, addr.0).await
+        Ok(())
     }
 
     async fn send_get_peers(
@@ -208,6 +216,7 @@ impl<S: PeerStore> DhtServer<S> {
             want.push("n6".to_string());
         }
         let query = KrpcQuery {
+            id: self.id.clone(),
             info_hash: Some(info_hash),
             want,
             ..Default::default()
@@ -217,11 +226,11 @@ impl<S: PeerStore> DhtServer<S> {
             t: self.seq.to_string(),
             y: MessageType::Query,
             q: Some(QueryType::GetPeers),
-            a: Some(query.clone()),
+            a: Some(query),
             ..Default::default()
         };
-        self.callback_map.insert(self.seq, tran.clone());
         self.send_krpc_message(message, node.peer_address.0).await?;
+        self.callback_map.insert(self.seq, tran.clone());
         Ok(())
     }
 
@@ -239,6 +248,7 @@ impl<S: PeerStore> DhtServer<S> {
             want.push("n6".to_string());
         }
         let mut query = KrpcQuery {
+            id: self.id.clone(),
             info_hash: Some(info_hash),
             implied_port: if !self.implied_port {
                 None
@@ -256,7 +266,7 @@ impl<S: PeerStore> DhtServer<S> {
                 t: self.seq.to_string(),
                 y: MessageType::Query,
                 q: Some(QueryType::AnnouncePeer),
-                a: Some(query.clone()),
+                a: Some(query),
                 ..Default::default()
             };
             self.callback_map.insert(self.seq, tran.clone());
@@ -284,7 +294,7 @@ impl<S: PeerStore> DhtServer<S> {
             .callback_map
             .remove(&tran_id)
             .ok_or(Error::TransactionNotFound(tran_id))?;
-        let rsp = message.r.take().ok_or(Error::ProtocolErr)?;
+        let mut rsp = message.r.take().ok_or(Error::ProtocolErr)?;
         if message.ro != Some(true) {
             self.insert_node(UpdatedNode::new_id_addr(rsp.id.clone(), addr));
         }
@@ -292,7 +302,7 @@ impl<S: PeerStore> DhtServer<S> {
             QueryType::Ping => self.on_ping_rsp(rsp, tran).await?,
             QueryType::FindNode => self.on_find_node_rsp(rsp, tran).await?,
             QueryType::GetPeers => {
-                if let Some(token) = rsp.token.clone() {
+                if let Some(token) = rsp.token.take() {
                     self.token_manager.insert_token(rsp.id.clone(), token);
                 }
                 self.on_get_peers_rsp(rsp, tran).await?;
@@ -378,8 +388,13 @@ impl<S: PeerStore> DhtServer<S> {
             tran.insert_id(n.id.clone());
             if self.support_ipv4 && !self.insert_node(UpdatedNode::new(n.clone())) && tran.depth > 0
             {
-                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
-                    .await?;
+                match self
+                    .send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await
+                {
+                    Err(e) => error!("send_get_peers failed, err:{}", e),
+                    Ok(_) => {}
+                };
             }
         }
         for n in node6s.drain(..) {
@@ -389,8 +404,13 @@ impl<S: PeerStore> DhtServer<S> {
             tran.insert_id(n.id.clone());
             if self.support_ipv6 && !self.insert_node(UpdatedNode::new(n.clone())) && tran.depth > 0
             {
-                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
-                    .await?;
+                match self
+                    .send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await
+                {
+                    Err(e) => error!("send_get_peers failed, err:{}", e),
+                    Ok(_) => {}
+                };
             }
         }
         Ok(())
@@ -406,8 +426,8 @@ impl<S: PeerStore> DhtServer<S> {
         let query = message.a.ok_or(Error::ProtocolErr)?;
         match query_t {
             QueryType::Ping => self.on_ping_query(query, message.t, addr).await?,
-            QueryType::FindNode => {}
-            QueryType::GetPeers => {}
+            QueryType::FindNode => self.on_find_node_query(query, message.t, addr).await?,
+            QueryType::GetPeers => self.on_get_peers_query(query, message.t, addr).await?,
             QueryType::AnnouncePeer => {}
         }
         unimplemented!()
@@ -435,6 +455,217 @@ impl<S: PeerStore> DhtServer<S> {
             }
         }
         self.send_krpc_message(message, addr).await?;
+        Ok(())
+    }
+
+    async fn on_find_node_query(
+        &mut self,
+        mut req: KrpcQuery,
+        tran_id: String,
+        mut addr: SocketAddr,
+    ) -> Result<()> {
+        let target = req.target.take().ok_or(Error::ProtocolErr)?;
+        let mut rsp = KrpcResponse {
+            id: self.id.clone(),
+            ..Default::default()
+        };
+        let mut want_ipv4 = false;
+        let mut want_ipv6 = false;
+        for n in req.want {
+            if n == "n4" {
+                want_ipv4 = true;
+            }
+            if n == "n6" {
+                want_ipv6 = true;
+            }
+        }
+        if !want_ipv4 && !want_ipv6 {
+            if addr.is_ipv4() {
+                rsp.nodes = Some(CompactNodes::from(
+                    self.routing_table4
+                        .closest(&target, self.k)
+                        .into_iter()
+                        .map(|update_node| update_node.node),
+                ));
+            } else {
+                rsp.nodes6 = Some(CompactNodes::from(
+                    self.routing_table6
+                        .closest(&target, self.k)
+                        .into_iter()
+                        .map(|update_node| update_node.node),
+                ));
+            }
+        }
+        if want_ipv4 {
+            rsp.nodes = Some(CompactNodes::from(
+                self.routing_table4
+                    .closest(&target, self.k)
+                    .into_iter()
+                    .map(|update_node| update_node.node),
+            ));
+        }
+        if want_ipv6 {
+            rsp.nodes6 = Some(CompactNodes::from(
+                self.routing_table6
+                    .closest(&target, self.k)
+                    .into_iter()
+                    .map(|update_node| update_node.node),
+            ));
+        }
+        let message = KrpcMessage {
+            t: tran_id,
+            y: MessageType::Response,
+            r: Some(rsp),
+            ..Default::default()
+        };
+        if req.implied_port.is_none() {
+            if let Some(port) = req.port {
+                addr.set_port(port);
+            }
+        }
+        self.send_krpc_message(message, addr).await?;
+        Ok(())
+    }
+
+    async fn on_get_peers_query(
+        &mut self,
+        mut req: KrpcQuery,
+        tran_id: String,
+        mut addr: SocketAddr,
+    ) -> Result<()> {
+        let info_hash = req.info_hash.take().ok_or(Error::ProtocolErr)?;
+        let mut rsp = KrpcResponse {
+            id: self.id.clone(),
+            ..Default::default()
+        };
+        let mut want_ipv4 = false;
+        let mut want_ipv6 = false;
+        for n in req.want {
+            if n == "n4" {
+                want_ipv4 = true;
+            }
+            if n == "n6" {
+                want_ipv6 = true;
+            }
+        }
+        if !want_ipv4 && !want_ipv6 {
+            if addr.is_ipv4() {
+                rsp.values = Some(CompactAddresses::from(
+                    self.peer_store
+                        .get(&info_hash, self.k)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|update_node| {
+                            if update_node.peer_address.0.is_ipv4() {
+                                Some(update_node.peer_address)
+                            } else {
+                                None
+                            }
+                        }),
+                ));
+            } else {
+                rsp.values = Some(CompactAddresses::from(
+                    self.peer_store
+                        .get(&info_hash, self.k)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|update_node| {
+                            if update_node.peer_address.0.is_ipv6() {
+                                Some(update_node.peer_address)
+                            } else {
+                                None
+                            }
+                        }),
+                ));
+            }
+            if want_ipv4 && want_ipv6 {
+                rsp.values = Some(CompactAddresses::from(
+                    self.peer_store
+                        .get(&info_hash, self.k)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .map(|update_node| update_node.peer_address),
+                ));
+            } else if want_ipv4 {
+                rsp.values = Some(CompactAddresses::from(
+                    self.peer_store
+                        .get(&info_hash, self.k)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|update_node| {
+                            if update_node.peer_address.0.is_ipv4() {
+                                Some(update_node.peer_address)
+                            } else {
+                                None
+                            }
+                        }),
+                ));
+            } else {
+                rsp.values = Some(CompactAddresses::from(
+                    self.peer_store
+                        .get(&info_hash, self.k)
+                        .unwrap_or(Vec::new())
+                        .into_iter()
+                        .filter_map(|update_node| {
+                            if update_node.peer_address.0.is_ipv6() {
+                                Some(update_node.peer_address)
+                            } else {
+                                None
+                            }
+                        }),
+                ));
+            }
+        }
+        rsp.token = Some(self.token_manager.create_token(None, &PeerAddress(addr)));
+        let message = KrpcMessage {
+            t: tran_id,
+            y: MessageType::Response,
+            r: Some(rsp),
+            ..Default::default()
+        };
+        if req.implied_port.is_none() {
+            if let Some(port) = req.port {
+                addr.set_port(port);
+            }
+        }
+        self.send_krpc_message(message, addr).await?;
+        Ok(())
+    }
+
+    async fn on_announce_peer(
+        &mut self,
+        mut req: KrpcQuery,
+        tran_id: String,
+        mut addr: SocketAddr,
+    ) -> Result<()> {
+        let info_hash = req.info_hash.take().ok_or(Error::ProtocolErr)?;
+        let token = req.token.take().ok_or(Error::ProtocolErr)?;
+        if !self.token_manager.valid_token(token, &PeerAddress(addr)) {
+            return Err(Error::ProtocolErr);
+        }
+        let rsp = KrpcResponse {
+            id: self.id.clone(),
+            ..Default::default()
+        };
+        let message = KrpcMessage {
+            t: tran_id,
+            y: MessageType::Response,
+            r: Some(rsp),
+            ..Default::default()
+        };
+        if req.implied_port.is_none() {
+            if let Some(port) = req.port {
+                addr.set_port(port);
+            }
+        }
+        self.send_krpc_message(message, addr).await?;
+        let _ = self.peer_store.insert(
+            info_hash,
+            Node {
+                id: req.id.clone(),
+                peer_address: PeerAddress(addr),
+            },
+        );
         Ok(())
     }
 
@@ -473,8 +704,13 @@ impl<S: PeerStore> DhtServer<S> {
                     let tran =
                         Transaction::new(cb.clone(), self.depth, QueryType::AnnouncePeer, None);
                     for n in self.get_closest_nodes(&info_hash) {
-                        self.send_announce_peer(n.node, info_hash.clone(), tran.clone())
-                            .await?;
+                        match self
+                            .send_announce_peer(n.node, info_hash.clone(), tran.clone())
+                            .await
+                        {
+                            Err(e) => error!("send_announce_peer failed, err:{}", e),
+                            Ok(_) => {}
+                        };
                     }
                 }
             },
