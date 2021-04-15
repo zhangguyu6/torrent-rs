@@ -2,6 +2,7 @@ use crate::error::Result;
 use crate::metainfo::{HashPiece, Node};
 use std::collections::{HashMap, HashSet};
 
+/// Store Peer announced info hash before
 pub trait PeerStore {
     /// store announced peer
     fn insert(&mut self, info_hash: HashPiece, node: Node) -> Result<()>;
@@ -11,6 +12,7 @@ pub trait PeerStore {
     fn get(&self, info_hash: &HashPiece, max: usize) -> Result<Vec<Node>>;
 }
 
+#[derive(Debug, Default)]
 pub struct MemPeerStore {
     node_to_info: HashMap<HashPiece, (Node, HashSet<HashPiece>)>,
     info_to_node: HashMap<HashPiece, HashSet<HashPiece>>,
@@ -57,9 +59,12 @@ impl PeerStore for MemPeerStore {
     }
 
     fn get(&self, info_hash: &HashPiece, max: usize) -> Result<Vec<Node>> {
-        let mut nodes = Vec::new();
+        let mut nodes = Vec::with_capacity(max);
         if let Some(ids) = self.info_to_node.get(info_hash) {
             for id in ids {
+                if nodes.len() == max {
+                    break;
+                }
                 if let Some((node, _)) = self.node_to_info.get(id) {
                     nodes.push(node.clone());
                 }

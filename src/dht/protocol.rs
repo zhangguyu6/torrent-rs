@@ -13,6 +13,7 @@ pub(crate) enum DhtReq {
     ShutDown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DhtRsp {
     Pong,
     FindNode(Option<Node>),
@@ -21,6 +22,7 @@ pub(crate) enum DhtRsp {
     ShutDown,
 }
 
+#[derive(Debug)]
 pub(crate) enum DhtMessage {
     Req(DhtReq, Sender<Result<DhtRsp>>),
     Message(KrpcMessage, SocketAddr),

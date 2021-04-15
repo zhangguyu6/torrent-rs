@@ -89,8 +89,22 @@ impl<S: PeerStore> DhtServer<S> {
         ))
     }
 
-    pub async fn bootstrap(&mut self) -> Result<()> {
-        unimplemented!()
+    pub async fn bootstrap<A: AsyncToSocketAddrs>(&mut self, address: A) -> Result<()> {
+        let (sender, _) = unbounded();
+        for addr in address.to_socket_addrs().await? {
+            self.send_find_node(
+                PeerAddress(addr),
+                self.id.clone(),
+                Transaction::new(
+                    sender.clone(),
+                    self.depth,
+                    QueryType::FindNode,
+                    Some(self.id.clone()),
+                ),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     fn insert_node(&mut self, node: UpdatedNode) -> bool {
@@ -133,10 +147,10 @@ impl<S: PeerStore> DhtServer<S> {
         Ok(DhtMessage::Message(krpc_message, addr))
     }
 
-    async fn send_krpc_message(
+    async fn send_krpc_message<A: AsyncToSocketAddrs>(
         &mut self,
         mut message: KrpcMessage,
-        addr: SocketAddr,
+        addr: A,
     ) -> Result<()> {
         match message.a.as_mut() {
             Some(query) => query.id = self.id.clone(),
@@ -147,8 +161,9 @@ impl<S: PeerStore> DhtServer<S> {
                 })
             }
         }
-        let mut buf = to_bytes(&message)?;
-        self.socket.send_to(&mut buf, addr).await?;
+        let buf = to_bytes(&message)?;
+        dbg!(&buf);
+        self.socket.send_to(&buf[..], addr).await?;
         Ok(())
     }
 
@@ -197,6 +212,7 @@ impl<S: PeerStore> DhtServer<S> {
             a: Some(query),
             ..Default::default()
         };
+        dbg!(&message);
         self.send_krpc_message(message, addr.0).await?;
         self.callback_map.insert(self.seq, tran);
         Ok(())
@@ -428,9 +444,9 @@ impl<S: PeerStore> DhtServer<S> {
             QueryType::Ping => self.on_ping_query(query, message.t, addr).await?,
             QueryType::FindNode => self.on_find_node_query(query, message.t, addr).await?,
             QueryType::GetPeers => self.on_get_peers_query(query, message.t, addr).await?,
-            QueryType::AnnouncePeer => {}
+            QueryType::AnnouncePeer => self.on_announce_peer(query, message.t, addr).await?,
         }
-        unimplemented!()
+        Ok(())
     }
 
     async fn on_ping_query(
@@ -670,7 +686,9 @@ impl<S: PeerStore> DhtServer<S> {
     }
 
     async fn handle(&mut self, buf: &mut [u8]) -> Result<bool> {
-        match or(self.receiver_req(), self.receiver_rsp(buf)).await {
+        let a = or(self.receiver_req(), self.receiver_rsp(buf)).await;
+        dbg!(&a);
+        match a {
             Ok(DhtMessage::Req(req, cb)) => match req {
                 DhtReq::ShutDown => {
                     let _ = cb.send(Ok(DhtRsp::ShutDown));
@@ -745,15 +763,56 @@ pub struct DhtClient {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use smol::{block_on, net::resolve};
 
     #[test]
     fn test_resolve() {
         block_on(async {
-            for addr in resolve("router.utorrent.com:6881").await.unwrap() {
-                println!("{}", addr);
-            }
+            let a = UdpSocket::bind("0.0.0.0:8989").await.unwrap();
+            dbg!(&a.send_to(b"1", "router.bittorrent.com:6881").await);
         })
+    }
+
+    #[test]
+    fn test_server() {
+        let config = DhtConfig {
+            k: 6,
+            id: HashPiece::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
+            secret: "hello".to_string(),
+            token_interval: Duration::from_secs(30),
+            max_token_interval_count: 2,
+            depth: 2,
+            implied_port: true,
+        };
+        block_on(async {
+            let (mut server, client) =
+                DhtServer::new("0.0.0.0:6881", &config, MemPeerStore::default())
+                    .await
+                    .unwrap();
+            // dbg!(&server.bootstrap("router.utorrent.com:6881").await);
+            // dbg!(server.run().await);
+            let query = KrpcQuery {
+                id: server.id.clone(),
+                ..Default::default()
+            };
+            let message = KrpcMessage {
+                t: "1".to_string(),
+                y: MessageType::Query,
+                q: Some(QueryType::Ping),
+                a: Some(query),
+                ..Default::default()
+            };
+            server
+                .send_krpc_message(message, "router.bittorrent.com:6881")
+                .await;
+            // let mut buf = [0; 1024];
+            // dbg!(server.socket.recv_from(&mut buf).await);
+            // dbg!(&buf[0..58]);
+            // dbg!(from_bytes::<KrpcMessage>(&buf[0..58]));
+            server.run().await;
+        });
     }
 }
