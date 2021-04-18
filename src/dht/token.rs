@@ -1,4 +1,3 @@
-use super::config::{DhtConfig, DHT_CONFIG};
 use crate::bencode::Value;
 use crate::metainfo::{HashPiece, PeerAddress};
 use sha1::{Digest, Sha1};
@@ -10,34 +9,25 @@ pub struct TokenManager {
     secret: String,
     interval: Duration,
     max_interval_count: usize,
-    token_m: HashMap<HashPiece, Value>,
-}
-
-impl Default for TokenManager {
-    fn default() -> Self {
-        Self::new(DHT_CONFIG.read().as_ref().unwrap())
-    }
+    tokens: HashMap<HashPiece, Value>,
 }
 
 impl TokenManager {
-    pub fn new(config: &DhtConfig) -> Self {
-        let secret = config.secret.clone();
-        let interval = config.token_interval;
-        let max_interval_count = config.max_token_interval_count;
+    pub fn new(secret: String, interval: Duration, max_interval_count: usize) -> Self {
         TokenManager {
             secret,
             interval,
             max_interval_count,
-            token_m: HashMap::new(),
+            tokens: HashMap::new(),
         }
     }
 
     pub fn get_token(&self, id: &HashPiece) -> Option<&Value> {
-        self.token_m.get(id)
+        self.tokens.get(id)
     }
 
     pub fn insert_token(&mut self, id: HashPiece, token: Value) -> Option<Value> {
-        self.token_m.insert(id, token)
+        self.tokens.insert(id, token)
     }
 
     pub fn create_token(&self, now: Option<SystemTime>, node: &PeerAddress) -> Value {

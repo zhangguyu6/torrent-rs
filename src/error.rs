@@ -1,3 +1,4 @@
+use crate::dht::DhtRsp;
 use crate::krpc::KrpcError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
@@ -54,6 +55,12 @@ pub enum Error {
     ProtocolErr,
     #[error("Transaction {0} not found, maybe timeout")]
     TransactionNotFound(usize),
+    #[error("TransactionTimeout")]
+    TransactionTimeout,
+    #[error("DhtServerErr {0}")]
+    DhtServerErr(String),
+    #[error("CallBackErr")]
+    DhtCallBackErr,
 }
 
 impl ser::Error for Error {

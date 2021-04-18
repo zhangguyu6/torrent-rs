@@ -5,7 +5,7 @@ use smol::channel::Sender;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DhtReq {
+pub enum DhtReq {
     Ping(PeerAddress),
     FindNode(PeerAddress, HashPiece),
     GetPeers(HashPiece),
@@ -14,7 +14,7 @@ pub(crate) enum DhtReq {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DhtRsp {
+pub enum DhtRsp {
     Pong,
     FindNode(Option<Node>),
     GetPeers(PeerAddress),
@@ -23,7 +23,8 @@ pub(crate) enum DhtRsp {
 }
 
 #[derive(Debug)]
-pub(crate) enum DhtMessage {
+pub enum DhtMessage {
     Req(DhtReq, Sender<Result<DhtRsp>>),
+    Refresh,
     Message(KrpcMessage, SocketAddr),
 }
