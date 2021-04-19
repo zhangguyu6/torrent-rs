@@ -1,8 +1,7 @@
-use super::DHT_CONFIG;
+use super::DhtConfig;
 use crate::metainfo::{HashPiece, Node, ID_LEN};
 use std::cmp;
 use std::collections::BTreeMap;
-use std::mem::size_of;
 use std::time::{Duration, Instant};
 
 /// After 15 minutes of inactivity, a node becomes questionable
@@ -97,13 +96,11 @@ pub struct RoutingTable {
 }
 
 impl RoutingTable {
-    pub fn new() -> Self {
-        let config = DHT_CONFIG.read().unwrap();
+    pub fn new(config: &DhtConfig) -> Self {
         let id = config.id.clone();
         let k = config.k;
         // The num of the bucket of the routing table
-        let len = ID_LEN * (size_of::<u8>() as usize);
-        drop(config);
+        let len = ID_LEN * 8;
         let mut buckets = Vec::with_capacity(len);
         for _ in 0..len {
             let bucket = Bucket::new(k);

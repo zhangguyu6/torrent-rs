@@ -13,8 +13,8 @@ sha-1 = "0.9.4"
 data-encoding = "2.3.2"
 url = "2.2.1"
 hex = "0.4.3"
-lazy_static = "1.4.0"
 log = "*"
+rand = "0.8.3"
 
 [dev-dependencies]
 tempfile = "3.2.0"

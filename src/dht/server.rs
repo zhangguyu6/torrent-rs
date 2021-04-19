@@ -57,9 +57,9 @@ impl<S: PeerStore> DhtServer<S> {
         } else {
             support_ipv6 = true;
         }
-        let routing_table4 = RoutingTable::new();
-        let routing_table6 = RoutingTable::new();
         let config_guard = config.read().unwrap();
+        let routing_table4 = RoutingTable::new(&config_guard);
+        let routing_table6 = RoutingTable::new(&config_guard);
         let token_manager = TokenManager::new(
             config_guard.secret.clone(),
             config_guard.token_interval,
@@ -180,7 +180,6 @@ impl<S: PeerStore> DhtServer<S> {
             }
         }
         let buf = to_bytes(&message)?;
-        dbg!(&buf);
         self.socket.send_to(&buf[..], addr).await?;
         Ok(())
     }
@@ -232,7 +231,6 @@ impl<S: PeerStore> DhtServer<S> {
             a: Some(query),
             ..Default::default()
         };
-        dbg!(&message);
         self.send_krpc_message(message, addr.0).await?;
         self.transaction_manager.insert(self.tran_seq, tran);
         Ok(())
@@ -360,7 +358,7 @@ impl<S: PeerStore> DhtServer<S> {
     }
 
     async fn on_ping_rsp(&mut self, _: KrpcResponse, tran: Transaction) -> Result<()> {
-        let _ = tran.callback(Ok(DhtRsp::Pong));
+        let _ = tran.callback(Ok(DhtRsp::Pong)).await;
         Ok(())
     }
 
@@ -408,7 +406,7 @@ impl<S: PeerStore> DhtServer<S> {
             }
         }
         if find_node.is_some() {
-            let _ = tran.callback(Ok(DhtRsp::FindNode(find_node)));
+            let _ = tran.callback(Ok(DhtRsp::FindNode(find_node))).await;
         }
         Ok(())
     }
@@ -420,7 +418,7 @@ impl<S: PeerStore> DhtServer<S> {
     ) -> Result<()> {
         if let Some(mut addrs) = rsp.values.take() {
             for addr in addrs.0.drain(..) {
-                let _ = tran.callback(Ok(DhtRsp::GetPeers(addr)));
+                let _ = tran.callback(Ok(DhtRsp::GetPeers(addr))).await;
             }
             return Ok(());
         }
@@ -461,7 +459,7 @@ impl<S: PeerStore> DhtServer<S> {
     }
 
     async fn on_announce_rsp(&mut self, _: KrpcResponse, tran: Transaction) -> Result<()> {
-        let _ = tran.callback(Ok(DhtRsp::Announced));
+        let _ = tran.callback(Ok(DhtRsp::Announced)).await;
         Ok(())
     }
 
@@ -785,7 +783,7 @@ impl<S: PeerStore> DhtServer<S> {
         }
         for node in removed_nodes.iter() {
             for tran in self.transaction_manager.remove_by_node(&node.id) {
-                let _ = tran.callback(Err(Error::TransactionTimeout));
+                let _ = tran.callback(Err(Error::TransactionTimeout)).await;
                 error!("tran {:?}, timeout", tran);
             }
         }
@@ -793,7 +791,7 @@ impl<S: PeerStore> DhtServer<S> {
             .transaction_manager
             .refresh(self.config.read().unwrap().max_transaction_time_out)
         {
-            let _ = tran.callback(Err(Error::TransactionTimeout));
+            let _ = tran.callback(Err(Error::TransactionTimeout)).await;
             error!("tran {:?}, timeout", tran);
         }
         Ok(())
@@ -820,7 +818,13 @@ pub struct DhtClient {
 }
 
 impl DhtClient {
-    pub async fn ping(&self, addr: PeerAddress) -> Result<()> {
+    pub async fn ping<A: AsyncToSocketAddrs>(&self, addr: A) -> Result<()> {
+        let peer_addrs: Vec<SocketAddr> = addr.to_socket_addrs().await?.collect();
+        if peer_addrs.len() != 1 {
+            error!("more than one address");
+            return Err(Error::ProtocolErr);
+        }
+        let addr = PeerAddress(peer_addrs[0].clone());
         let (sender, receiver) = unbounded();
         match self
             .sender
@@ -910,6 +914,26 @@ impl DhtClient {
             Err(e) => Err(e),
         }
     }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        let (sender, receiver) = unbounded();
+        match self
+            .sender
+            .send(DhtMessage::Req(DhtReq::ShutDown, sender))
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => error!("shutdown failed, message {:?}", e.into_inner()),
+        }
+        match receiver.recv().await? {
+            Ok(DhtRsp::ShutDown) => Ok(()),
+            Ok(rsp) => {
+                error!("expect receive shutdown, but receive {:?}", rsp);
+                Err(Error::ProtocolErr)
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -917,54 +941,69 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use smol::{block_on, net::resolve};
+    use smol::block_on;
 
     #[test]
-    fn test_resolve() {
+    fn test_server_bootstrap() {
+        let config = DhtConfig {
+            k: 8,
+            id: HashPiece::rand_new(),
+            secret: "hello".to_string(),
+            token_interval: Duration::from_secs(30),
+            max_token_interval_count: 2,
+            refresh_interval: Duration::from_secs(30),
+            depth: 2,
+            implied_port: true,
+            max_transaction_time_out: Duration::from_secs(5),
+        };
         block_on(async {
-            let a = UdpSocket::bind("0.0.0.0:8989").await.unwrap();
-            dbg!(&a.send_to(b"1", "router.bittorrent.com:6881").await);
-        })
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6881",
+                Arc::new(RwLock::new(config)),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+            assert!(server.bootstrap("router.bittorrent.com:6881").await.is_ok());
+
+            assert!(or(server.run(), async move {
+                Timer::after(Duration::from_secs(5)).await;
+                drop(client);
+                Ok(())
+            })
+            .await
+            .is_ok());
+        });
     }
 
     #[test]
-    fn test_server() {
-        // let config = DhtConfig {
-        //     k: 6,
-        //     id: HashPiece::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
-        //     secret: "hello".to_string(),
-        //     token_interval: Duration::from_secs(30),
-        //     max_token_interval_count: 2,
-        //     depth: 2,
-        //     implied_port: true,
-        // };
-        // block_on(async {
-        //     let (mut server, client) =
-        //         DhtServer::new("0.0.0.0:6881", &config, MemPeerStore::default())
-        //             .await
-        //             .unwrap();
-        //     dbg!(&server.bootstrap("router.bittorrent.com:6881").await);
-        // dbg!(server.run().await);
-        // let query = KrpcQuery {
-        //     id: server.id.clone(),
-        //     ..Default::default()
-        // };
-        // let message = KrpcMessage {
-        //     t: "1".to_string(),
-        //     y: MessageType::Query,
-        //     q: Some(QueryType::Ping),
-        //     a: Some(query),
-        //     ..Default::default()
-        // };
-        // server
-        //     .send_krpc_message(message, "router.bittorrent.com:6881")
-        //     .await;
-        // let mut buf = [0; 1024];
-        // dbg!(server.socket.recv_from(&mut buf).await);
-        // dbg!(&buf[0..58]);
-        // dbg!(from_bytes::<KrpcMessage>(&buf[0..58]));
-        // server.run().await;
-        // }
-        // );
+    fn test_client_ping() {
+        let config = DhtConfig {
+            k: 8,
+            id: HashPiece::rand_new(),
+            secret: "hello".to_string(),
+            token_interval: Duration::from_secs(30),
+            max_token_interval_count: 2,
+            refresh_interval: Duration::from_secs(30),
+            depth: 2,
+            implied_port: true,
+            max_transaction_time_out: Duration::from_secs(5),
+        };
+        block_on(async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6881",
+                Arc::new(RwLock::new(config)),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                assert!(client.ping("router.bittorrent.com:6881").await.is_ok());
+                Ok(())
+            })
+            .await
+            .is_ok());
+        });
     }
 }

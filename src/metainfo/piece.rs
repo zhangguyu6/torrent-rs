@@ -2,6 +2,7 @@ use super::Info;
 use crate::bencode::{to_bytes, Value};
 use crate::error::Result;
 use crate::utils::Chains;
+use rand::random;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -33,6 +34,11 @@ impl HashPiece {
         Self(hash_val)
     }
 
+    pub fn rand_new() -> Self {
+        let hash_val = random();
+        Self(hash_val)
+    }
+
     pub(crate) fn leading_zeros(&self) -> usize {
         let mut zeros = 0;
         for v in self.0.iter() {
@@ -45,7 +51,7 @@ impl HashPiece {
     }
 
     pub(crate) fn bits(&self) -> usize {
-        ID_LEN * size_of::<u8>() - self.leading_zeros()
+        ID_LEN * 8 - self.leading_zeros() - 1
     }
 }
 

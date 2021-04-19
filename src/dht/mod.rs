@@ -1,6 +1,5 @@
 mod config;
 pub use config::DhtConfig;
-use config::DHT_CONFIG;
 
 mod protocol;
 pub use protocol::{DhtMessage, DhtReq, DhtRsp};
