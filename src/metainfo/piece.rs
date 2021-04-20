@@ -14,7 +14,6 @@ use smol::{
 };
 use std::convert::TryInto;
 use std::fmt;
-use std::mem::size_of;
 use std::ops::BitXor;
 use std::path::PathBuf;
 use std::result::Result as StdResult;

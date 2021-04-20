@@ -15,7 +15,7 @@ pub enum DhtReq {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DhtRsp {
-    Pong,
+    Pong(HashPiece),
     FindNode(Option<Node>),
     GetPeers(PeerAddress),
     Announced,

@@ -209,6 +209,7 @@ impl<S: PeerStore> DhtServer<S> {
         target: HashPiece,
         tran: Transaction,
     ) -> Result<()> {
+        dbg!(&addr);
         let id = self.config.read().unwrap().id.clone();
         let mut want = Vec::new();
         if self.support_ipv4 {
@@ -231,6 +232,7 @@ impl<S: PeerStore> DhtServer<S> {
             a: Some(query),
             ..Default::default()
         };
+        // dbg!(&message);
         self.send_krpc_message(message, addr.0).await?;
         self.transaction_manager.insert(self.tran_seq, tran);
         Ok(())
@@ -337,6 +339,7 @@ impl<S: PeerStore> DhtServer<S> {
             .remove(&tran_id)
             .ok_or(Error::TransactionNotFound(tran_id))?;
         let mut rsp = message.r.take().ok_or(Error::ProtocolErr)?;
+        dbg!(&addr);
         if message.ro != Some(true) {
             self.insert_node(Node {
                 id: rsp.id.clone(),
@@ -357,8 +360,8 @@ impl<S: PeerStore> DhtServer<S> {
         Ok(())
     }
 
-    async fn on_ping_rsp(&mut self, _: KrpcResponse, tran: Transaction) -> Result<()> {
-        let _ = tran.callback(Ok(DhtRsp::Pong)).await;
+    async fn on_ping_rsp(&mut self, rsp: KrpcResponse, tran: Transaction) -> Result<()> {
+        let _ = tran.callback(Ok(DhtRsp::Pong(rsp.id))).await;
         Ok(())
     }
 
@@ -556,6 +559,7 @@ impl<S: PeerStore> DhtServer<S> {
             r: Some(rsp),
             ..Default::default()
         };
+        dbg!(&message);
         if req.implied_port.is_none() {
             if let Some(port) = req.port {
                 addr.set_port(port);
@@ -818,7 +822,7 @@ pub struct DhtClient {
 }
 
 impl DhtClient {
-    pub async fn ping<A: AsyncToSocketAddrs>(&self, addr: A) -> Result<()> {
+    pub async fn ping<A: AsyncToSocketAddrs>(&self, addr: A) -> Result<HashPiece> {
         let peer_addrs: Vec<SocketAddr> = addr.to_socket_addrs().await?.collect();
         if peer_addrs.len() != 1 {
             error!("more than one address");
@@ -835,7 +839,7 @@ impl DhtClient {
             Err(e) => error!("ping failed, addr {:?}, message {:?}", addr, e.into_inner()),
         }
         match receiver.recv().await? {
-            Ok(DhtRsp::Pong) => Ok(()),
+            Ok(DhtRsp::Pong(id)) => Ok(id),
             Ok(rsp) => {
                 error!("expect receive pong, but receive {:?}", rsp);
                 Err(Error::ProtocolErr)
@@ -844,7 +848,17 @@ impl DhtClient {
         }
     }
 
-    pub async fn find_node(&self, addr: PeerAddress, id: HashPiece) -> Result<Option<Node>> {
+    pub async fn find_node<A: AsyncToSocketAddrs>(
+        &self,
+        addr: A,
+        id: HashPiece,
+    ) -> Result<Option<Node>> {
+        let peer_addrs: Vec<SocketAddr> = addr.to_socket_addrs().await?.collect();
+        if peer_addrs.len() != 1 {
+            error!("more than one address");
+            return Err(Error::ProtocolErr);
+        }
+        let addr = PeerAddress(peer_addrs[0].clone());
         let (sender, receiver) = unbounded();
         match self
             .sender
@@ -859,7 +873,10 @@ impl DhtClient {
             ),
         }
         match receiver.recv().await? {
-            Ok(DhtRsp::FindNode(node)) => Ok(node),
+            Ok(DhtRsp::FindNode(node)) => Ok({
+                dbg!(&node);
+                node
+            }),
             Ok(rsp) => {
                 error!("expect receive find_node, but receive {:?}", rsp);
                 Err(Error::ProtocolErr)
@@ -944,18 +961,8 @@ mod tests {
     use smol::block_on;
 
     #[test]
-    fn test_server_bootstrap() {
-        let config = DhtConfig {
-            k: 8,
-            id: HashPiece::rand_new(),
-            secret: "hello".to_string(),
-            token_interval: Duration::from_secs(30),
-            max_token_interval_count: 2,
-            refresh_interval: Duration::from_secs(30),
-            depth: 2,
-            implied_port: true,
-            max_transaction_time_out: Duration::from_secs(5),
-        };
+    fn test_dht_bootstrap() {
+        let config = DhtConfig::default();
         block_on(async {
             let (mut server, client) = DhtServer::new(
                 "0.0.0.0:6881",
@@ -977,33 +984,83 @@ mod tests {
     }
 
     #[test]
-    fn test_client_ping() {
-        let config = DhtConfig {
-            k: 8,
-            id: HashPiece::rand_new(),
-            secret: "hello".to_string(),
-            token_interval: Duration::from_secs(30),
-            max_token_interval_count: 2,
-            refresh_interval: Duration::from_secs(30),
-            depth: 2,
-            implied_port: true,
-            max_transaction_time_out: Duration::from_secs(5),
-        };
-        block_on(async {
+    fn test_dht_ping() {
+        let config = DhtConfig::default();
+        let fut0 = async {
             let (mut server, client) = DhtServer::new(
                 "0.0.0.0:6881",
-                Arc::new(RwLock::new(config)),
+                Arc::new(RwLock::new(config.clone())),
                 MemPeerStore::default(),
             )
             .await
             .unwrap();
 
             assert!(or(server.run(), async move {
-                assert!(client.ping("router.bittorrent.com:6881").await.is_ok());
+                Timer::after(Duration::from_secs(1)).await;
+                drop(client);
                 Ok(())
             })
             .await
             .is_ok());
-        });
+        };
+        let fut1 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6882",
+                Arc::new(RwLock::new(config.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                assert!(client.ping("127.0.0.1:6881").await.is_ok());
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        block_on(or(fut0, fut1));
+    }
+
+    #[test]
+    fn test_dht_get_peers() {
+        let config0 = DhtConfig::default();
+        let fut0 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6881",
+                Arc::new(RwLock::new(config0.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                assert!(client.ping("127.0.0.1:6882").await.is_ok());
+                Timer::after(Duration::from_secs(2)).await;
+                drop(client);
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        let config1 = DhtConfig::default();
+        let fut1 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6882",
+                Arc::new(RwLock::new(config1.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                Timer::after(Duration::from_secs(1)).await;
+                assert!(client.find_node("127.0.0.1:6881", config1.id).await.is_ok());
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        block_on(or(fut0, fut1));
     }
 }

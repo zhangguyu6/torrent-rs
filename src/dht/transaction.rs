@@ -58,7 +58,7 @@ impl TransactionManager {
         let mut removed_trans = Vec::new();
         let removed_tran_pairs = self
             .seq_transactions
-            .drain_filter(|_, tran| tran.last_updated - now > time_out);
+            .drain_filter(|_, tran| now - tran.last_updated > time_out);
         for (seq, tran) in removed_tran_pairs {
             if let Some(id) = tran.target.as_ref() {
                 if let Some(seqs) = self.id_seqs.get_mut(id) {

@@ -46,14 +46,14 @@ impl<T: AsRef<[u8]>> From<T> for Node {
         let id = HashPiece::new(v[0..ID_LEN].try_into().unwrap());
         let peer_address;
         if v.len() == NODE_V4_LEN {
-            let ip_buf: [u8; ADDRESS_V4_LEN - 2] = v[0..ADDRESS_V4_LEN - 2].try_into().unwrap();
+            let ip_buf: [u8; ADDRESS_V4_LEN - 2] = v[ID_LEN..NODE_V4_LEN - 2].try_into().unwrap();
             let ip = Ipv4Addr::from(ip_buf);
-            let port = u16::from_be_bytes([v[ADDRESS_V4_LEN - 2], v[ADDRESS_V4_LEN - 1]]);
+            let port = u16::from_be_bytes([v[NODE_V4_LEN - 2], v[NODE_V4_LEN - 1]]);
             peer_address = PeerAddress(SocketAddr::new(IpAddr::V4(ip), port))
         } else if v.len() == NODE_V6_LEN {
-            let ip_buf: [u8; ADDRESS_V6_LEN - 2] = v[0..ADDRESS_V6_LEN - 2].try_into().unwrap();
+            let ip_buf: [u8; ADDRESS_V6_LEN - 2] = v[ID_LEN..NODE_V6_LEN - 2].try_into().unwrap();
             let ip = Ipv6Addr::from(ip_buf);
-            let port = u16::from_be_bytes([v[ADDRESS_V6_LEN - 2], v[ADDRESS_V6_LEN - 1]]);
+            let port = u16::from_be_bytes([v[NODE_V6_LEN - 2], v[NODE_V6_LEN - 1]]);
             peer_address = PeerAddress(SocketAddr::new(IpAddr::V6(ip), port))
         } else {
             unreachable!()
@@ -135,5 +135,21 @@ impl<'de> Deserialize<'de> for CompactNodes {
             }
         }
         deserializer.deserialize_byte_buf(CompactNodesVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_node() {
+        let node = Node {
+            id: HashPiece::rand_new(),
+            peer_address: PeerAddress("127.0.0.1:80".parse().unwrap()),
+        };
+        let buf: Vec<u8> = (&node).into();
+        let new_node = Node::from(&buf);
+        assert_eq!(node, new_node);
     }
 }
