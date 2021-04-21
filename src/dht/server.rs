@@ -350,6 +350,7 @@ impl<S: PeerStore> DhtServer<S> {
             QueryType::Ping => self.on_ping_rsp(rsp, tran).await?,
             QueryType::FindNode => self.on_find_node_rsp(rsp, tran).await?,
             QueryType::GetPeers => {
+                dbg!(&rsp);
                 if let Some(token) = rsp.token.take() {
                     self.token_manager.insert_token(rsp.id.clone(), token);
                 }
@@ -627,43 +628,43 @@ impl<S: PeerStore> DhtServer<S> {
                         }),
                 ));
             }
-            if want_ipv4 && want_ipv6 {
-                rsp.values = Some(CompactAddresses::from(
-                    self.peer_store
-                        .get(&info_hash, k)
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .map(|update_node| update_node.peer_address),
-                ));
-            } else if want_ipv4 {
-                rsp.values = Some(CompactAddresses::from(
-                    self.peer_store
-                        .get(&info_hash, k)
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .filter_map(|update_node| {
-                            if update_node.peer_address.0.is_ipv4() {
-                                Some(update_node.peer_address)
-                            } else {
-                                None
-                            }
-                        }),
-                ));
-            } else {
-                rsp.values = Some(CompactAddresses::from(
-                    self.peer_store
-                        .get(&info_hash, k)
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .filter_map(|update_node| {
-                            if update_node.peer_address.0.is_ipv6() {
-                                Some(update_node.peer_address)
-                            } else {
-                                None
-                            }
-                        }),
-                ));
-            }
+        }
+        if want_ipv4 && want_ipv6 {
+            rsp.values = Some(CompactAddresses::from(
+                self.peer_store
+                    .get(&info_hash, k)
+                    .unwrap_or(Vec::new())
+                    .into_iter()
+                    .map(|update_node| update_node.peer_address),
+            ));
+        } else if want_ipv4 {
+            rsp.values = Some(CompactAddresses::from(
+                self.peer_store
+                    .get(&info_hash, k)
+                    .unwrap_or(Vec::new())
+                    .into_iter()
+                    .filter_map(|update_node| {
+                        if update_node.peer_address.0.is_ipv4() {
+                            Some(update_node.peer_address)
+                        } else {
+                            None
+                        }
+                    }),
+            ));
+        } else {
+            rsp.values = Some(CompactAddresses::from(
+                self.peer_store
+                    .get(&info_hash, k)
+                    .unwrap_or(Vec::new())
+                    .into_iter()
+                    .filter_map(|update_node| {
+                        if update_node.peer_address.0.is_ipv6() {
+                            Some(update_node.peer_address)
+                        } else {
+                            None
+                        }
+                    }),
+            ));
         }
         rsp.token = Some(self.token_manager.create_token(None, &PeerAddress(addr)));
         let message = KrpcMessage {
@@ -747,6 +748,7 @@ impl<S: PeerStore> DhtServer<S> {
                         QueryType::GetPeers,
                     );
                     for n in self.get_closest_nodes(&info_hash) {
+                        dbg!(&n);
                         self.send_get_peers(n, info_hash.clone(), tran.clone())
                             .await?;
                     }
@@ -900,7 +902,10 @@ impl DhtClient {
             ),
         }
         receiver.filter_map(|rsp| match rsp {
-            Ok(DhtRsp::GetPeers(addr)) => Some(addr),
+            Ok(DhtRsp::GetPeers(addr)) => {
+                dbg!(&addr);
+                Some(addr)
+            }
             _ => None,
         })
     }
@@ -955,10 +960,10 @@ impl DhtClient {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use smol::block_on;
+    use std::convert::TryInto;
+    use std::time::Duration;
 
     #[test]
     fn test_dht_bootstrap() {
@@ -1023,7 +1028,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dht_get_peers() {
+    fn test_dht_find_node() {
         let config0 = DhtConfig::default();
         let fut0 = async {
             let (mut server, client) = DhtServer::new(
@@ -1056,6 +1061,63 @@ mod tests {
             assert!(or(server.run(), async move {
                 Timer::after(Duration::from_secs(1)).await;
                 assert!(client.find_node("127.0.0.1:6881", config1.id).await.is_ok());
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        block_on(or(fut0, fut1));
+    }
+
+    #[test]
+    fn test_dht_get_peers() {
+        let config0 = DhtConfig::default();
+        let info_hash0 = HashPiece::rand_new();
+        let info_hash1 = info_hash0.clone();
+        let fut0 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6881",
+                Arc::new(RwLock::new(config0.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(server
+                .peer_store
+                .insert(
+                    info_hash0.clone(),
+                    Node {
+                        id: info_hash0.clone(),
+                        peer_address: PeerAddress("127.0.0.1:1".parse().unwrap()),
+                    },
+                )
+                .is_ok());
+
+            assert!(or(server.run(), async move {
+                Timer::after(Duration::from_secs(2)).await;
+                drop(client);
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        let config1 = DhtConfig::default();
+        let fut1 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6882",
+                Arc::new(RwLock::new(config1.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                assert!(client.ping("127.0.0.1:6881").await.is_ok());
+                let mut fut = client.get_peers(info_hash1.clone()).await;
+                while let Some(addr) = fut.next().await {
+                    assert_eq!(addr, PeerAddress("127.0.0.1:1".parse().unwrap()));
+                }
                 Ok(())
             })
             .await
