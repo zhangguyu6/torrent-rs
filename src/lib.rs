@@ -8,6 +8,8 @@ pub mod dht;
 pub mod error;
 pub mod krpc;
 pub mod metainfo;
+pub mod peer_exchange;
+
 mod utils;
 
 pub use bencode::{from_bytes, from_str, to_bytes, to_str, Deserializer, Serializer};

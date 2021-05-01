@@ -209,7 +209,6 @@ impl<S: PeerStore> DhtServer<S> {
         target: HashPiece,
         tran: Transaction,
     ) -> Result<()> {
-        dbg!(&addr);
         let id = self.config.read().unwrap().id.clone();
         let mut want = Vec::new();
         if self.support_ipv4 {
@@ -232,7 +231,6 @@ impl<S: PeerStore> DhtServer<S> {
             a: Some(query),
             ..Default::default()
         };
-        // dbg!(&message);
         self.send_krpc_message(message, addr.0).await?;
         self.transaction_manager.insert(self.tran_seq, tran);
         Ok(())
@@ -339,7 +337,6 @@ impl<S: PeerStore> DhtServer<S> {
             .remove(&tran_id)
             .ok_or(Error::TransactionNotFound(tran_id))?;
         let mut rsp = message.r.take().ok_or(Error::ProtocolErr)?;
-        dbg!(&addr);
         if message.ro != Some(true) {
             self.insert_node(Node {
                 id: rsp.id.clone(),
@@ -350,7 +347,6 @@ impl<S: PeerStore> DhtServer<S> {
             QueryType::Ping => self.on_ping_rsp(rsp, tran).await?,
             QueryType::FindNode => self.on_find_node_rsp(rsp, tran).await?,
             QueryType::GetPeers => {
-                dbg!(&rsp);
                 if let Some(token) = rsp.token.take() {
                     self.token_manager.insert_token(rsp.id.clone(), token);
                 }
@@ -435,13 +431,8 @@ impl<S: PeerStore> DhtServer<S> {
             }
             tran.insert_id(n.id.clone());
             if self.support_ipv4 && !self.insert_node(n.clone()) && tran.depth > 0 {
-                match self
-                    .send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
-                    .await
-                {
-                    Err(e) => error!("send_get_peers failed, err:{}", e),
-                    Ok(_) => {}
-                };
+                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
             }
         }
         for n in node6s.drain(..) {
@@ -450,13 +441,8 @@ impl<S: PeerStore> DhtServer<S> {
             }
             tran.insert_id(n.id.clone());
             if self.support_ipv6 && !self.insert_node(n.clone()) && tran.depth > 0 {
-                match self
-                    .send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
-                    .await
-                {
-                    Err(e) => error!("send_get_peers failed, err:{}", e),
-                    Ok(_) => {}
-                };
+                self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
+                    .await?;
             }
         }
         Ok(())
@@ -560,7 +546,6 @@ impl<S: PeerStore> DhtServer<S> {
             r: Some(rsp),
             ..Default::default()
         };
-        dbg!(&message);
         if req.implied_port.is_none() {
             if let Some(port) = req.port {
                 addr.set_port(port);
@@ -748,7 +733,6 @@ impl<S: PeerStore> DhtServer<S> {
                         QueryType::GetPeers,
                     );
                     for n in self.get_closest_nodes(&info_hash) {
-                        dbg!(&n);
                         self.send_get_peers(n, info_hash.clone(), tran.clone())
                             .await?;
                     }
@@ -875,10 +859,7 @@ impl DhtClient {
             ),
         }
         match receiver.recv().await? {
-            Ok(DhtRsp::FindNode(node)) => Ok({
-                dbg!(&node);
-                node
-            }),
+            Ok(DhtRsp::FindNode(node)) => Ok(node),
             Ok(rsp) => {
                 error!("expect receive find_node, but receive {:?}", rsp);
                 Err(Error::ProtocolErr)
@@ -902,10 +883,7 @@ impl DhtClient {
             ),
         }
         receiver.filter_map(|rsp| match rsp {
-            Ok(DhtRsp::GetPeers(addr)) => {
-                dbg!(&addr);
-                Some(addr)
-            }
+            Ok(DhtRsp::GetPeers(addr)) => Some(addr),
             _ => None,
         })
     }
@@ -962,7 +940,6 @@ impl DhtClient {
 mod tests {
     use super::*;
     use smol::block_on;
-    use std::convert::TryInto;
     use std::time::Duration;
 
     #[test]
@@ -1117,6 +1094,57 @@ mod tests {
                 let mut fut = client.get_peers(info_hash1.clone()).await;
                 while let Some(addr) = fut.next().await {
                     assert_eq!(addr, PeerAddress("127.0.0.1:1".parse().unwrap()));
+                }
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        block_on(or(fut0, fut1));
+    }
+
+    #[test]
+    fn test_dht_on_announce() {
+        let config0 = DhtConfig::default();
+        let info_hash0 = HashPiece::rand_new();
+        let info_hash1 = info_hash0.clone();
+        let fut0 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6881",
+                Arc::new(RwLock::new(config0.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                Timer::after(Duration::from_secs(2)).await;
+                drop(client);
+                Ok(())
+            })
+            .await
+            .is_ok());
+        };
+        let config1 = DhtConfig::default();
+        let fut1 = async {
+            let (mut server, client) = DhtServer::new(
+                "0.0.0.0:6882",
+                Arc::new(RwLock::new(config1.clone())),
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(or(server.run(), async move {
+                assert!(client.ping("127.0.0.1:6881").await.is_ok());
+                let mut fut = client.get_peers(info_hash1.clone()).await;
+                while let Some(_) = fut.next().await {
+                    assert!(false);
+                }
+                assert!(client.announce(info_hash1.clone()).await.is_ok());
+                let mut fut = client.get_peers(info_hash1.clone()).await;
+                while let Some(addr) = fut.next().await {
+                    assert_eq!(addr, PeerAddress("127.0.0.1:6882".parse().unwrap()));
                 }
                 Ok(())
             })
