@@ -1,4 +1,4 @@
-use crate::error::Error;
+use super::error::{BencodeError, Result};
 use serde::{
     de::{
         self, Deserialize, DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess,
@@ -10,10 +10,10 @@ use serde::{
         SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, Serializer,
     },
 };
-
 use std::collections::{btree_map, BTreeMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::result::Result as StdResult;
 use std::vec;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -25,7 +25,7 @@ pub enum Value {
 }
 
 impl Serialize for Value {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -51,7 +51,7 @@ impl Serialize for Value {
 }
 
 impl<'de> Deserialize<'de> for Value {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -64,42 +64,42 @@ impl<'de> Deserialize<'de> for Value {
                 formatter.write_str("any Bencode value")
             }
 
-            fn visit_i64<E>(self, i: i64) -> Result<Value, E>
+            fn visit_i64<E>(self, i: i64) -> StdResult<Value, E>
             where
                 E: de::Error,
             {
                 Ok(Value::Integer(i.into()))
             }
 
-            fn visit_u64<E>(self, u: u64) -> Result<Value, E>
+            fn visit_u64<E>(self, u: u64) -> StdResult<Value, E>
             where
                 E: de::Error,
             {
                 Ok(Value::Integer(u as i64))
             }
 
-            fn visit_str<E>(self, s: &str) -> Result<Value, E>
+            fn visit_str<E>(self, s: &str) -> StdResult<Value, E>
             where
                 E: de::Error,
             {
                 Ok(Value::Bytes(s.into()))
             }
 
-            fn visit_string<E>(self, s: String) -> Result<Value, E>
+            fn visit_string<E>(self, s: String) -> StdResult<Value, E>
             where
                 E: de::Error,
             {
                 Ok(Value::Bytes(s.into()))
             }
 
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            fn visit_bytes<E>(self, v: &[u8]) -> StdResult<Self::Value, E>
             where
                 E: de::Error,
             {
                 Ok(Value::Bytes(v.into()))
             }
 
-            fn visit_seq<V>(self, mut visitor: V) -> Result<Value, V::Error>
+            fn visit_seq<V>(self, mut visitor: V) -> StdResult<Value, V::Error>
             where
                 V: SeqAccess<'de>,
             {
@@ -112,7 +112,7 @@ impl<'de> Deserialize<'de> for Value {
                 Ok(Value::List(vec))
             }
 
-            fn visit_map<V>(self, mut visitor: V) -> Result<Value, V::Error>
+            fn visit_map<V>(self, mut visitor: V) -> StdResult<Value, V::Error>
             where
                 V: MapAccess<'de>,
             {
@@ -166,11 +166,11 @@ impl From<BTreeMap<String, Value>> for Value {
     }
 }
 
-pub fn to_value<T: Serialize>(value: T) -> Result<Value, Error> {
+pub fn to_value<T: Serialize>(value: T) -> Result<Value> {
     value.serialize(ValueSerializer)
 }
 
-pub fn from_value<'de, T: Deserialize<'de>>(value: Value) -> Result<T, Error> {
+pub fn from_value<'de, T: Deserialize<'de>>(value: Value) -> Result<T> {
     Deserialize::deserialize(value)
 }
 
@@ -180,9 +180,9 @@ pub struct ValueSerializeSeq(Vec<Value>);
 
 impl SerializeSeq for ValueSerializeSeq {
     type Ok = Value;
-    type Error = Error;
+    type Error = BencodeError;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Error>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
@@ -190,16 +190,16 @@ impl SerializeSeq for ValueSerializeSeq {
         Ok(())
     }
 
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::List(self.0))
     }
 }
 
 impl SerializeTuple for ValueSerializeSeq {
     type Ok = Value;
-    type Error = Error;
+    type Error = BencodeError;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Error>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
@@ -207,31 +207,31 @@ impl SerializeTuple for ValueSerializeSeq {
         Ok(())
     }
 
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::List(self.0))
     }
 }
 
 impl SerializeTupleStruct for ValueSerializeSeq {
     type Ok = Value;
-    type Error = Error;
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Error> {
+    type Error = BencodeError;
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         self.0.push(to_value(&value)?);
         Ok(())
     }
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::List(self.0))
     }
 }
 
 impl SerializeTupleVariant for ValueSerializeSeq {
     type Ok = Value;
-    type Error = Error;
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Error> {
+    type Error = BencodeError;
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         self.0.push(to_value(&value)?);
         Ok(())
     }
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::List(self.0))
     }
 }
@@ -240,65 +240,70 @@ pub struct ValueSerializeMap(BTreeMap<String, Value>, Option<String>);
 
 impl SerializeMap for ValueSerializeMap {
     type Ok = Value;
-    type Error = Error;
-    fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Error> {
+    type Error = BencodeError;
+    fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
         let key = to_value(key)?;
         let key_string = match key {
             Value::Bytes(buf) => String::from_utf8(buf)?,
-            _ => return Err(Error::CustomErr("key is not string".to_string())),
+            val => {
+                return Err(BencodeError::UnexpectedValueType(format!(
+                    "expect get bytes, but get {:?}",
+                    val
+                )))
+            }
         };
         self.1 = Some(key_string);
         Ok(())
     }
-    fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), Error> {
+    fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let value = to_value(value)?;
         let key = self.1.take().unwrap();
         self.0.insert(key, value);
         Ok(())
     }
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::Dict(self.0))
     }
 }
 
 impl SerializeStruct for ValueSerializeMap {
     type Ok = Value;
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
         key: &'static str,
         value: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let value = to_value(value)?;
         self.0.insert(key.to_string(), value);
         Ok(())
     }
 
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::Dict(self.0))
     }
 }
 
 impl SerializeStructVariant for ValueSerializeMap {
     type Ok = Value;
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
         key: &'static str,
         value: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let value = to_value(value)?;
         self.0.insert(key.to_string(), value);
         Ok(())
     }
-    fn end(self) -> Result<Value, Error> {
+    fn end(self) -> Result<Value> {
         Ok(Value::Dict(self.0))
     }
 }
 
 impl Serializer for ValueSerializer {
     type Ok = Value;
-    type Error = Error;
+    type Error = BencodeError;
     type SerializeSeq = ValueSerializeSeq;
     type SerializeTuple = ValueSerializeSeq;
     type SerializeTupleStruct = ValueSerializeSeq;
@@ -307,76 +312,87 @@ impl Serializer for ValueSerializer {
     type SerializeStruct = ValueSerializeMap;
     type SerializeStructVariant = ValueSerializeMap;
 
-    fn serialize_bool(self, v: bool) -> Result<Value, Error> {
+    fn serialize_bool(self, v: bool) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i8(self, v: i8) -> Result<Value, Error> {
+    fn serialize_i8(self, v: i8) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i16(self, v: i16) -> Result<Value, Error> {
+    fn serialize_i16(self, v: i16) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i32(self, v: i32) -> Result<Value, Error> {
+    fn serialize_i32(self, v: i32) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i64(self, v: i64) -> Result<Value, Error> {
+    fn serialize_i64(self, v: i64) -> Result<Value> {
         Ok(Value::Integer(v))
     }
 
-    fn serialize_u8(self, v: u8) -> Result<Value, Error> {
+    fn serialize_u8(self, v: u8) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u16(self, v: u16) -> Result<Value, Error> {
+    fn serialize_u16(self, v: u16) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u32(self, v: u32) -> Result<Value, Error> {
+    fn serialize_u32(self, v: u32) -> Result<Value> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u64(self, v: u64) -> Result<Value, Error> {
+    fn serialize_u64(self, v: u64) -> Result<Value> {
         let v = i64::try_from(v)?;
         self.serialize_i64(v)
     }
 
-    fn serialize_f32(self, _: f32) -> Result<Value, Error> {
-        Err(Error::CustomErr("not support serialize float".to_string()))
+    fn serialize_f32(self, _: f32) -> Result<Value> {
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize float".to_string(),
+        ))
     }
 
-    fn serialize_f64(self, _: f64) -> Result<Value, Error> {
-        Err(Error::CustomErr("not support serialize float".to_string()))
+    fn serialize_f64(self, _: f64) -> Result<Value> {
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize float".to_string(),
+        ))
     }
 
-    fn serialize_char(self, v: char) -> Result<Value, Error> {
+    fn serialize_char(self, v: char) -> Result<Value> {
         Ok(Value::Bytes(vec![v as u8]))
     }
 
-    fn serialize_str(self, v: &str) -> Result<Value, Error> {
+    fn serialize_str(self, v: &str) -> Result<Value> {
         Ok(Value::Bytes(v.as_bytes().to_vec()))
     }
 
-    fn serialize_bytes(self, v: &[u8]) -> Result<Value, Error> {
+    fn serialize_bytes(self, v: &[u8]) -> Result<Value> {
         Ok(Value::Bytes(v.to_vec()))
     }
-    fn serialize_none(self) -> Result<Value, Error> {
-        Err(Error::CustomErr("not support serialize none".to_string()))
+
+    fn serialize_none(self) -> Result<Value> {
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize none".to_string(),
+        ))
     }
 
-    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Value, Error> {
+    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Value> {
         value.serialize(self)
     }
 
-    fn serialize_unit(self) -> Result<Value, Error> {
-        Err(Error::CustomErr("not support serialize none".to_string()))
+    fn serialize_unit(self) -> Result<Value> {
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize none".to_string(),
+        ))
     }
 
-    fn serialize_unit_struct(self, _: &'static str) -> Result<Value, Error> {
-        Err(Error::CustomErr("not support serialize none".to_string()))
+    fn serialize_unit_struct(self, _: &'static str) -> Result<Value> {
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize none".to_string(),
+        ))
     }
 
     fn serialize_unit_variant(
@@ -384,7 +400,7 @@ impl Serializer for ValueSerializer {
         _: &'static str,
         _: u32,
         variant: &'static str,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value> {
         self.serialize_str(variant)
     }
 
@@ -392,7 +408,7 @@ impl Serializer for ValueSerializer {
         self,
         _: &'static str,
         value: &T,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value> {
         value.serialize(self)
     }
 
@@ -402,17 +418,17 @@ impl Serializer for ValueSerializer {
         _: u32,
         _: &'static str,
         value: &T,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value> {
         value.serialize(self)
     }
 
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Error> {
+    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         Ok(ValueSerializeSeq(Vec::with_capacity(
             len.unwrap_or_default(),
         )))
     }
 
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Error> {
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
         Ok(ValueSerializeSeq(Vec::with_capacity(len)))
     }
 
@@ -420,7 +436,7 @@ impl Serializer for ValueSerializer {
         self,
         _: &'static str,
         len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Error> {
+    ) -> Result<Self::SerializeTupleStruct> {
         Ok(ValueSerializeSeq(Vec::with_capacity(len)))
     }
 
@@ -430,15 +446,15 @@ impl Serializer for ValueSerializer {
         _: u32,
         _: &'static str,
         len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Error> {
+    ) -> Result<Self::SerializeTupleVariant> {
         self.serialize_seq(Some(len))
     }
 
-    fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Error> {
+    fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
         Ok(ValueSerializeMap(BTreeMap::new(), None))
     }
 
-    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeMap, Error> {
+    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeMap> {
         Ok(ValueSerializeMap(BTreeMap::new(), None))
     }
 
@@ -448,7 +464,7 @@ impl Serializer for ValueSerializer {
         _: u32,
         _: &'static str,
         _: usize,
-    ) -> Result<Self::SerializeMap, Error> {
+    ) -> Result<Self::SerializeMap> {
         Ok(ValueSerializeMap(BTreeMap::new(), None))
     }
 }
@@ -456,12 +472,9 @@ impl Serializer for ValueSerializer {
 pub struct ValueDeserializeSeq(vec::IntoIter<Value>);
 
 impl<'de> SeqAccess<'de> for ValueDeserializeSeq {
-    type Error = Error;
+    type Error = BencodeError;
 
-    fn next_element_seed<T: DeserializeSeed<'de>>(
-        &mut self,
-        seed: T,
-    ) -> Result<Option<T::Value>, Error> {
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
         if let Some(v) = self.0.next() {
             seed.deserialize(v).map(Some)
         } else {
@@ -475,9 +488,9 @@ pub struct ValueDeserializeMap(btree_map::IntoIter<String, Value>, Option<Value>
 pub struct StringDeserializer(String);
 
 impl<'de> Deserializer<'de> for StringDeserializer {
-    type Error = Error;
+    type Error = BencodeError;
 
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -492,11 +505,8 @@ impl<'de> Deserializer<'de> for StringDeserializer {
 }
 
 impl<'de, 'a> MapAccess<'de> for ValueDeserializeMap {
-    type Error = Error;
-    fn next_key_seed<K: de::DeserializeSeed<'de>>(
-        &mut self,
-        seed: K,
-    ) -> Result<Option<K::Value>, Error> {
+    type Error = BencodeError;
+    fn next_key_seed<K: de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
         if let Some((k, v)) = self.0.next() {
             self.1 = Some(v);
             seed.deserialize(StringDeserializer(k)).map(Some)
@@ -505,11 +515,11 @@ impl<'de, 'a> MapAccess<'de> for ValueDeserializeMap {
         }
     }
 
-    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Error> {
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
         if let Some(v) = self.1.take() {
             seed.deserialize(v)
         } else {
-            Err(Error::CustomErr("not find value".to_string()))
+            Err(BencodeError::Custom("not find value".to_string()))
         }
     }
 }
@@ -517,50 +527,47 @@ impl<'de, 'a> MapAccess<'de> for ValueDeserializeMap {
 pub struct ValueDeserializeVariant(Value);
 
 impl<'de> VariantAccess<'de> for ValueDeserializeVariant {
-    type Error = Error;
+    type Error = BencodeError;
 
-    fn unit_variant(self) -> Result<(), Error> {
+    fn unit_variant(self) -> Result<()> {
         Ok(())
     }
 
-    fn newtype_variant_seed<T: de::DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, Error> {
+    fn newtype_variant_seed<T: de::DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         seed.deserialize(self.0)
     }
 
-    fn tuple_variant<V: de::Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value, Error> {
+    fn tuple_variant<V: de::Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         match self.0 {
             Value::List(values) => visitor.visit_seq(ValueDeserializeSeq(values.into_iter())),
-            _ => Err(Error::CustomErr("not a list".to_string())),
+            _ => Err(BencodeError::Custom("not a list".to_string())),
         }
     }
     fn struct_variant<V: de::Visitor<'de>>(
         self,
         _: &'static [&'static str],
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         match self.0 {
             Value::Dict(dict) => visitor.visit_map(ValueDeserializeMap(dict.into_iter(), None)),
-            _ => Err(Error::CustomErr("not a dict".to_string())),
+            _ => Err(BencodeError::Custom("not a dict".to_string())),
         }
     }
 }
 
 impl<'de> EnumAccess<'de> for ValueDeserializeVariant {
-    type Error = Error;
+    type Error = BencodeError;
     type Variant = Self;
 
-    fn variant_seed<V: DeserializeSeed<'de>>(
-        self,
-        seed: V,
-    ) -> Result<(V::Value, Self::Variant), Error> {
+    fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self::Variant)> {
         let val = seed.deserialize(self.0.clone())?;
         Ok((val, self))
     }
 }
 
 impl<'de> Deserializer<'de> for Value {
-    type Error = Error;
-    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    type Error = BencodeError;
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Bytes(buf) => visitor.visit_byte_buf(buf),
             Value::List(values) => visitor.visit_seq(ValueDeserializeSeq(values.into_iter())),
@@ -568,7 +575,7 @@ impl<'de> Deserializer<'de> for Value {
             Value::Integer(num) => visitor.visit_i64(num),
         }
     }
-    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => {
                 if num == 0 {
@@ -577,144 +584,200 @@ impl<'de> Deserializer<'de> for Value {
                     visitor.visit_bool(true)
                 }
             }
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
-    fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_i8(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_i16(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_i32(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_i64(num),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_char(num as u8 as char),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_u8(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_u16(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_u32(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_u64(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_u128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_u128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_u128(num.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_f32(num as f32),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Integer(num) => visitor.visit_f64(num as f64),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Bytes(buf) => visitor.visit_bytes(buf.as_slice()),
-            _ => Err(Error::CustomErr("not a buf".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect bytes, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Bytes(buf) => visitor.visit_byte_buf(buf),
-            _ => Err(Error::CustomErr("not a buf".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect bytes, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Bytes(buf) => visitor.visit_string(String::from_utf8(buf)?),
-            _ => Err(Error::CustomErr("not a buf".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect bytes, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Bytes(buf) => {
                 let s = std::str::from_utf8(buf.as_slice())?;
                 visitor.visit_str(s)
             }
-            _ => Err(Error::CustomErr("not a buf".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect bytes, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_unit<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
-        Err(Error::CustomErr("not support bencode to unit".to_string()))
+    fn deserialize_unit<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
+        Err(BencodeError::Custom(
+            "not support bencode to unit".to_string(),
+        ))
     }
 
     fn deserialize_unit_struct<V: Visitor<'de>>(
         self,
         _: &'static str,
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         self.deserialize_unit(visitor)
     }
 
-    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::List(values) => visitor.visit_seq(ValueDeserializeSeq(values.into_iter())),
-            _ => Err(Error::CustomErr("not a list".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect list, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         visitor.visit_some(self)
     }
 
@@ -722,29 +785,35 @@ impl<'de> Deserializer<'de> for Value {
         self,
         _: &'static str,
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         visitor.visit_newtype_struct(self)
     }
 
-    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self {
             Value::Dict(dict) => visitor.visit_map(ValueDeserializeMap(dict.into_iter(), None)),
-            _ => Err(Error::CustomErr("not a list".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect dict, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_tuple<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_tuple<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         match self {
             Value::List(values) => visitor.visit_seq(ValueDeserializeSeq(values.into_iter())),
-            _ => Err(Error::CustomErr("not a list".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect list, but get {:?}",
+                val
+            ))),
         }
     }
 
-    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_str(visitor)
     }
 
-    fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_any(visitor)
     }
 
@@ -753,10 +822,13 @@ impl<'de> Deserializer<'de> for Value {
         _: &'static str,
         _: usize,
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         match self {
             Value::Dict(dict) => visitor.visit_map(ValueDeserializeMap(dict.into_iter(), None)),
-            _ => Err(Error::CustomErr("not a list".to_string())),
+            val => Err(BencodeError::UnexpectedValueType(format!(
+                "expect dict, but get {:?}",
+                val
+            ))),
         }
     }
 
@@ -765,7 +837,7 @@ impl<'de> Deserializer<'de> for Value {
         _name: &'static str,
         _fields: &'static [&'static str],
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         self.deserialize_map(visitor)
     }
 
@@ -774,7 +846,7 @@ impl<'de> Deserializer<'de> for Value {
         _: &'static str,
         _: &'static [&'static str],
         visitor: V,
-    ) -> Result<V::Value, Error> {
+    ) -> Result<V::Value> {
         visitor.visit_enum(ValueDeserializeVariant(self))
     }
 }

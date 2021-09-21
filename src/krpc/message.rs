@@ -1,8 +1,7 @@
+use super::node::CompactNodes;
 use super::KrpcError;
-use crate::{
-    bencode::Value,
-    metainfo::{CompactAddresses, CompactNodes, HashPiece},
-};
+use crate::bencode::Value;
+use crate::metainfo::{CompactAddresses, HashPiece};
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,

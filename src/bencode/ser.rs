@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use super::error::{BencodeError, Result};
 use serde::ser;
 use std::convert::TryFrom;
 use std::io::Write;
@@ -42,7 +42,7 @@ impl<'a, W: Write> SerializeSeq<'a, W> {
 
 impl<'a, W: Write> ser::SerializeSeq for SerializeSeq<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_element<T: ?Sized + ser::Serialize>(&mut self, value: &T) -> Result<()> {
         value.serialize(&mut *self.0)
     }
@@ -54,7 +54,7 @@ impl<'a, W: Write> ser::SerializeSeq for SerializeSeq<'a, W> {
 
 impl<'a, W: Write> ser::SerializeTuple for SerializeSeq<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_element<T: ?Sized + ser::Serialize>(&mut self, value: &T) -> Result<()> {
         value.serialize(&mut *self.0)
     }
@@ -65,7 +65,7 @@ impl<'a, W: Write> ser::SerializeTuple for SerializeSeq<'a, W> {
 
 impl<'a, W: Write> ser::SerializeTupleStruct for SerializeSeq<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + ser::Serialize>(&mut self, value: &T) -> Result<()> {
         value.serialize(&mut *self.0)
     }
@@ -76,7 +76,7 @@ impl<'a, W: Write> ser::SerializeTupleStruct for SerializeSeq<'a, W> {
 
 impl<'a, W: Write> ser::SerializeTupleVariant for SerializeSeq<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + ser::Serialize>(&mut self, value: &T) -> Result<()> {
         value.serialize(&mut *self.0)
     }
@@ -96,7 +96,7 @@ impl<'a, W: Write> SerializeMap<'a, W> {
 
 impl<'a, W: Write> ser::SerializeMap for SerializeMap<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_key<T: ?Sized + ser::Serialize>(&mut self, key: &T) -> Result<()> {
         key.serialize(&mut *self.0)
     }
@@ -126,7 +126,7 @@ impl<'a, W: Write> SerializeStruct<'a, W> {
 
 impl<'a, W: Write> ser::SerializeStruct for SerializeStruct<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + ser::Serialize>(
         &mut self,
         key: &'static str,
@@ -147,7 +147,7 @@ impl<'a, W: Write> ser::SerializeStruct for SerializeStruct<'a, W> {
 
 impl<'a, W: Write> ser::SerializeStructVariant for SerializeStruct<'a, W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     fn serialize_field<T: ?Sized + ser::Serialize>(
         &mut self,
         key: &'static str,
@@ -167,7 +167,7 @@ impl<'a, W: Write> ser::SerializeStructVariant for SerializeStruct<'a, W> {
 
 impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
     type Ok = ();
-    type Error = Error;
+    type Error = BencodeError;
     type SerializeSeq = SerializeSeq<'a, W>;
     type SerializeTuple = SerializeSeq<'a, W>;
     type SerializeTupleStruct = SerializeSeq<'a, W>;
@@ -215,11 +215,15 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_f32(self, _: f32) -> Result<()> {
-        Err(Error::CustomErr("not support serialize float".to_string()))
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize float".to_string(),
+        ))
     }
 
     fn serialize_f64(self, _: f64) -> Result<()> {
-        Err(Error::CustomErr("not support serialize float".to_string()))
+        Err(BencodeError::UnexpectedValueType(
+            "not support serialize float".to_string(),
+        ))
     }
 
     fn serialize_char(self, v: char) -> Result<()> {

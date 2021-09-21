@@ -5,6 +5,7 @@ use serde::{
 };
 use std::fmt::{self, Display, Formatter};
 use std::mem::transmute;
+use thiserror::Error;
 
 /// Errors, or KRPC message dictionaries with a "y" value of "e",
 /// contain one additional key "e". The value of "e" is a list.
@@ -30,7 +31,7 @@ impl From<i64> for KrpcErrorCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub struct KrpcError {
     code: KrpcErrorCode,
     desc: String,

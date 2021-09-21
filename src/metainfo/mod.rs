@@ -1,16 +1,17 @@
+//! This moduie implements metainfo file format defined in https://www.bittorrent.org/beps/bep_0003.html
+
 mod address;
 pub use address::{CompactAddresses, PeerAddress};
 pub(crate) use address::{ADDRESS_V4_LEN, ADDRESS_V6_LEN};
 
+mod error;
+pub use error::MetaInfoError;
+
 mod info;
 pub use info::Info;
 
-mod magnet;
-
 mod meta;
-
-mod node;
-pub use node::{CompactNodes, Node};
+pub use meta::{MetaInfo, UrlList};
 
 mod piece;
 pub(crate) use piece::ID_LEN;

@@ -1,5 +1,6 @@
 use crate::error::Result;
-use crate::metainfo::{HashPiece, Node};
+use crate::krpc::Node;
+use crate::metainfo::HashPiece;
 use std::collections::{HashMap, HashSet};
 
 /// Store Peer announced info hash before

@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for UrlList {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-/// Represents the .torrent file
+/// The MetaInfo represents the .torrent file.
 pub struct MetaInfo {
     /// Info dictionary
     pub info: Value,

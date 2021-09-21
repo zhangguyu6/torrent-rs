@@ -1,5 +1,5 @@
+use super::error::MetaInfoError;
 use crate::bencode::Value;
-use crate::Error;
 use serde::{
     de::{self, SeqAccess, Visitor},
     ser::SerializeSeq,
@@ -19,7 +19,7 @@ pub(crate) const ADDRESS_V6_LEN: usize = 18;
 pub struct PeerAddress(pub(crate) SocketAddr);
 
 impl FromStr for PeerAddress {
-    type Err = Error;
+    type Err = MetaInfoError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.parse()?))
     }

@@ -1,5 +1,5 @@
-use super::{PeerAddress, ADDRESS_V4_LEN, ADDRESS_V6_LEN, ID_LEN};
 use crate::metainfo::HashPiece;
+use crate::metainfo::{PeerAddress, ADDRESS_V4_LEN, ADDRESS_V6_LEN, ID_LEN};
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,

@@ -1,9 +1,10 @@
-use crate::dht::DhtRsp;
+use crate::bencode::BencodeError;
 use crate::krpc::KrpcError;
+use async_std::channel::RecvError;
+use async_std::future::TimeoutError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
 use serde::{de, ser};
-use smol::channel::RecvError;
 use std::net::AddrParseError;
 use std::path::StripPrefixError;
 use std::str::Utf8Error;
@@ -29,10 +30,7 @@ pub enum Error {
     CustomErr(String),
     #[error("ConvertCharErr {0}")]
     ConvertCharErr(#[from] char::CharTryFromError),
-    #[error("PathConvertErr")]
-    PathConvertErr,
-    #[error("EmptyRootPath")]
-    EmptyRootPath,
+
     #[error("BrokenMagnetLinkErr {0}")]
     BrokenMagnetLinkErr(Url),
     #[error("BASE32Err {0}")]
@@ -46,7 +44,9 @@ pub enum Error {
     #[error("Utf8Err {0}")]
     Utf8Err(#[from] Utf8Error),
     #[error("KrpcErr {0}")]
-    KrpcErr(KrpcError),
+    KrpcErr(#[from] KrpcError),
+    #[error("BencodeError {0}")]
+    BencodeError(#[from] BencodeError),
     #[error("DhtAddrBindErr")]
     DhtAddrBindErr,
     #[error("ChannelClosed {0}")]
@@ -57,10 +57,14 @@ pub enum Error {
     TransactionNotFound(usize),
     #[error("TransactionTimeout")]
     TransactionTimeout,
+    #[error("TransactionRelatedNodeIsRemoved")]
+    TransactionRelatedNodeIsRemoved,
     #[error("DhtServerErr {0}")]
     DhtServerErr(String),
     #[error("CallBackErr")]
     DhtCallBackErr,
+    #[error("TimeoutError")]
+    TimeoutError(#[from] TimeoutError),
 }
 
 impl ser::Error for Error {

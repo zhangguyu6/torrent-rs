@@ -1,10 +1,8 @@
+use super::error::{MetaInfoError, Result};
 use super::piece::HashPieces;
-use crate::{
-    bencode::{from_value, to_value, Value},
-    error::{Error, Result},
-};
+use crate::bencode::{from_value, to_value, Value};
+use async_std::{fs, stream::StreamExt};
 use serde::{Deserialize, Serialize};
-use smol::{fs, stream::StreamExt};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::{cmp::Ordering, convert::TryFrom};
@@ -37,7 +35,7 @@ impl File {
                 if let Ok(mut dir_entrys) = fs::read_dir(p).await {
                     while let Some(entry) = dir_entrys.next().await {
                         let entry = entry?;
-                        deque.push_front(entry.path())
+                        deque.push_front(entry.path().into())
                     }
                 }
             } else {
@@ -87,11 +85,15 @@ impl Info {
         let name = match root_path.as_ref().file_name() {
             Some(s) => s
                 .to_str()
-                .map_or(Err(Error::PathConvertErr), |v| Ok(v.to_string()))?,
-            None => return Err(Error::EmptyRootPath),
+                .map_or(Err(MetaInfoError::PathConvert), |v| Ok(v.to_string()))?,
+            None => return Err(MetaInfoError::EmptyRootPath),
         };
         let (files, paths) = File::walk(root_path).await?;
-        let pieces = HashPieces::hashes(paths, piece_length).await?;
+        let mut readers = Vec::with_capacity(paths.len());
+        for path in paths {
+            readers.push(fs::OpenOptions::new().read(true).open(path).await?);
+        }
+        let pieces = HashPieces::hash_pieces(readers, piece_length).await?;
         if files.len() == 1 {
             Ok(Self {
                 name: name,
@@ -116,9 +118,9 @@ impl Info {
 }
 
 impl TryFrom<Value> for Info {
-    type Error = Error;
+    type Error = MetaInfoError;
     fn try_from(value: Value) -> Result<Self> {
-        from_value(value)
+        Ok(from_value(value)?)
     }
 }
 
@@ -133,7 +135,7 @@ mod tests {
     use super::*;
     use crate::bencode::{from_value, to_value};
     use crate::metainfo::piece::PIECE_SIZE_256_KB;
-    use smol::block_on;
+    use async_std::task::block_on;
     use std::io::Write;
     use tempfile::{tempdir, NamedTempFile};
 

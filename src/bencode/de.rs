@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use super::error::{BencodeError, Result};
 use serde::de;
 use std::convert::{TryFrom, TryInto};
 use std::io::Read;
@@ -27,7 +27,7 @@ enum ParseResult {
 }
 
 impl TryFrom<u8> for ParseResult {
-    type Error = Error;
+    type Error = BencodeError;
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
@@ -36,9 +36,10 @@ impl TryFrom<u8> for ParseResult {
             b'l' => Ok(ParseResult::List),
             b'd' => Ok(ParseResult::Dict),
             b'e' => Ok(ParseResult::End),
-            _ => Err(Error::CustomErr(
-                "Bencode only support int, bytes, list and map".to_string(),
-            )),
+            c => Err(BencodeError::UnexpectedValueType(format!(
+                "Bencode only support int, bytes, list and dict,but get {}",
+                c
+            ))),
         }
     }
 }
@@ -76,7 +77,11 @@ impl<R: Read> Deserializer<R> {
             match c {
                 b'e' | b':' => break,
                 b'0'..=b'9' | b'-' => buf.push(c),
-                _ => return Err(Error::CustomErr("except num but get string".to_string())),
+                _ => {
+                    return Err(BencodeError::Custom(
+                        "except int but get string".to_string(),
+                    ))
+                }
             }
         }
         Ok(i64::from_str(&String::from_utf8(buf)?)?)
@@ -90,7 +95,7 @@ impl<R: Read> Deserializer<R> {
 }
 
 impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
-    type Error = Error;
+    type Error = BencodeError;
     fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
@@ -101,7 +106,7 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
             }
             ParseResult::List => visitor.visit_seq(DeserializeSeq(self)),
             ParseResult::Dict => visitor.visit_map(DeserializeMap(self)),
-            ParseResult::End => Err(Error::CustomErr("not expect stream end".to_string())),
+            ParseResult::End => Err(BencodeError::Custom("unexpected End".to_string())),
         }
     }
 
@@ -115,7 +120,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                     visitor.visit_bool(false)
                 }
             }
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -123,7 +131,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_i8(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect int but get {:?}",
+                res,
+            ))),
         }
     }
 
@@ -131,7 +142,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_i16(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -139,7 +153,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_i32(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -147,7 +164,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_i64(self.parse_int()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -158,7 +178,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                 let i: u32 = self.parse_int()?.try_into()?;
                 visitor.visit_char(i.try_into()?)
             }
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get char, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -166,7 +189,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_u8(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -174,7 +200,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_u16(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -182,7 +211,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_u32(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -190,7 +222,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_u64(self.parse_int()?.try_into()?),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -198,7 +233,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_f32(self.parse_int()? as f32),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -206,7 +244,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Int => visitor.visit_f64(self.parse_int()? as f64),
-            _ => Err(Error::CustomErr("not an int".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get int, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -217,7 +258,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                 self.set_next(next);
                 visitor.visit_bytes(&self.parse_bytes()?)
             }
-            _ => Err(Error::CustomErr("not bytes".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get bytes, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -228,7 +272,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                 self.set_next(next);
                 visitor.visit_byte_buf(self.parse_bytes()?)
             }
-            _ => Err(Error::CustomErr("not bytes".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get bytes, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -240,7 +287,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                 let bytes = self.parse_bytes()?;
                 visitor.visit_string(String::from_utf8(bytes)?)
             }
-            _ => Err(Error::CustomErr("not bytes".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get bytes, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -252,7 +302,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
                 let bytes = self.parse_bytes()?;
                 visitor.visit_str(String::from_utf8(bytes)?.as_str())
             }
-            _ => Err(Error::CustomErr("not bytes".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get bytes, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -260,12 +313,17 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::List => visitor.visit_seq(DeserializeSeq(self)),
-            _ => Err(Error::CustomErr("not seq".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get seq, but get {:?}",
+                res
+            ))),
         }
     }
 
     fn deserialize_unit<V: de::Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        Err(Error::CustomErr("not support bencode to unit".to_string()))
+        Err(BencodeError::UnexpectedValueType(
+            "Bencode only support int, bytes, list and dict,but get unit".to_string(),
+        ))
     }
 
     fn deserialize_unit_struct<V: de::Visitor<'de>>(
@@ -280,7 +338,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::Dict => visitor.visit_map(DeserializeMap(self)),
-            _ => Err(Error::CustomErr("not map".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get dict, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -288,7 +349,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::List => visitor.visit_seq(DeserializeSeq(self)),
-            _ => Err(Error::CustomErr("not seq".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get list, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -301,7 +365,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         let next = self.next()?;
         match ParseResult::try_from(next)? {
             ParseResult::List => visitor.visit_seq(DeserializeSeq(self)),
-            _ => Err(Error::CustomErr("not seq".to_string())),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get list, but get {:?}",
+                res
+            ))),
         }
     }
 
@@ -347,7 +414,7 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
 pub struct DeserializeSeq<'a, R>(&'a mut Deserializer<R>);
 
 impl<'de, 'a, R: Read> de::SeqAccess<'de> for DeserializeSeq<'a, R> {
-    type Error = Error;
+    type Error = BencodeError;
 
     fn next_element_seed<T: de::DeserializeSeed<'de>>(
         &mut self,
@@ -367,7 +434,7 @@ impl<'de, 'a, R: Read> de::SeqAccess<'de> for DeserializeSeq<'a, R> {
 pub struct DeserializeMap<'a, R>(&'a mut Deserializer<R>);
 
 impl<'de, 'a, R: 'a + Read> de::MapAccess<'de> for DeserializeMap<'a, R> {
-    type Error = Error;
+    type Error = BencodeError;
     fn next_key_seed<K: de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
         match ParseResult::try_from(self.0.peek()?)? {
             ParseResult::End => {
@@ -390,7 +457,7 @@ impl<'de, 'a, R: 'a + Read> de::MapAccess<'de> for DeserializeMap<'a, R> {
 pub struct DeserializeVariant<'a, R>(&'a mut Deserializer<R>);
 
 impl<'de, 'a, R: 'a + Read> de::VariantAccess<'de> for DeserializeVariant<'a, R> {
-    type Error = Error;
+    type Error = BencodeError;
 
     fn unit_variant(self) -> Result<()> {
         Ok(())
@@ -403,9 +470,10 @@ impl<'de, 'a, R: 'a + Read> de::VariantAccess<'de> for DeserializeVariant<'a, R>
     fn tuple_variant<V: de::Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         match ParseResult::try_from(self.0.next()?)? {
             ParseResult::List => visitor.visit_seq(DeserializeSeq(self.0)),
-            _ => Err(Error::CustomErr(
-                "excepct list as tuple variant".to_string(),
-            )),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get list, but get {:?}",
+                res
+            ))),
         }
     }
     fn struct_variant<V: de::Visitor<'de>>(
@@ -415,15 +483,16 @@ impl<'de, 'a, R: 'a + Read> de::VariantAccess<'de> for DeserializeVariant<'a, R>
     ) -> Result<V::Value> {
         match ParseResult::try_from(self.0.next()?)? {
             ParseResult::Dict => visitor.visit_map(DeserializeMap(self.0)),
-            _ => Err(Error::CustomErr(
-                "excepct list as struct variant".to_string(),
-            )),
+            res => Err(BencodeError::UnexpectedValueType(format!(
+                "expect get dict, but get {:?}",
+                res
+            ))),
         }
     }
 }
 
 impl<'de, 'a, R: Read> de::EnumAccess<'de> for DeserializeVariant<'a, R> {
-    type Error = Error;
+    type Error = BencodeError;
     type Variant = Self;
 
     fn variant_seed<V: de::DeserializeSeed<'de>>(

@@ -1,6 +1,6 @@
 use super::{
     DhtConfig, DhtMessage, DhtReq, DhtRsp, MemPeerStore, PeerStore, RoutingTable, TokenManager,
-    Transaction, TransactionManager,
+    Transaction,
 };
 use crate::bencode::{from_bytes, to_bytes};
 use crate::error::{Error, Result};
@@ -9,15 +9,17 @@ use crate::krpc::{
 };
 use crate::metainfo::{CompactAddresses, CompactNodes, HashPiece, Node, PeerAddress};
 use log::{debug, error};
+use rand::{thread_rng, Rng};
 use smol::{
-    channel::{unbounded, Receiver, Sender},
+    channel::{bounded, unbounded, Receiver, Sender},
     future::{or, race},
     net::{AsyncToSocketAddrs, UdpSocket},
-    stream::{Stream, StreamExt},
     Timer,
 };
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 /// Dht Sever Instance
 pub struct DhtServer<S = MemPeerStore> {
@@ -25,14 +27,13 @@ pub struct DhtServer<S = MemPeerStore> {
     support_ipv4: bool,
     support_ipv6: bool,
     socket: UdpSocket,
-    routing_table4: RoutingTable,
-    routing_table6: RoutingTable,
+    routing_table: RoutingTable,
     token_manager: TokenManager,
     receiver: Receiver<DhtMessage>,
-    tran_seq: usize,
-    transaction_manager: TransactionManager,
     peer_store: S,
     config: Arc<RwLock<DhtConfig>>,
+    tran_seq: usize,
+    trans: HashMap<usize, Transaction>,
 }
 
 impl<S: PeerStore> DhtServer<S> {
@@ -58,31 +59,30 @@ impl<S: PeerStore> DhtServer<S> {
             support_ipv6 = true;
         }
         let config_guard = config.read().unwrap();
-        let routing_table4 = RoutingTable::new(&config_guard);
-        let routing_table6 = RoutingTable::new(&config_guard);
+        let routing_table = RoutingTable::new(&config_guard);
         let token_manager = TokenManager::new(
             config_guard.secret.clone(),
             config_guard.token_interval,
             config_guard.max_token_interval_count,
         );
         let (sender, receiver) = unbounded();
-        let seq = 0;
-        let transaction_manager = TransactionManager::default();
         drop(config_guard);
+        let mut rng = thread_rng();
+        let tran_seq: usize = rng.gen_range(0..usize::MAX / 2);
+        let trans = HashMap::default();
         Ok((
             Self {
                 addr,
                 socket: UdpSocket::bind(addr).await.unwrap(),
                 support_ipv4,
                 support_ipv6,
-                routing_table4,
-                routing_table6,
+                routing_table,
                 token_manager,
                 receiver,
-                transaction_manager,
-                tran_seq: seq,
                 peer_store,
                 config,
+                tran_seq,
+                trans,
             },
             DhtClient { sender },
         ))
@@ -103,12 +103,7 @@ impl<S: PeerStore> DhtServer<S> {
                 .send_find_node(
                     PeerAddress(addr),
                     id.clone(),
-                    Transaction::new(
-                        Some(sender.clone()),
-                        depth,
-                        Some(id.clone()),
-                        QueryType::FindNode,
-                    ),
+                    Transaction::new(sender.clone(), depth, Some(id.clone()), QueryType::FindNode),
                 )
                 .await
             {
@@ -119,34 +114,18 @@ impl<S: PeerStore> DhtServer<S> {
         Ok(())
     }
 
-    fn insert_node(&mut self, node: Node) -> bool {
-        let mut existed = false;
-        if node.peer_address.0.is_ipv4() {
-            if self.support_ipv4 {
-                if let Some(_) = self.routing_table4.insert(node.clone()) {
-                    existed = true;
-                }
-            }
-        }
-        if node.peer_address.0.is_ipv6() {
-            if self.support_ipv6 {
-                if let Some(_) = self.routing_table6.insert(node.clone()) {
-                    existed = true;
-                }
-            }
-        }
-        existed
-    }
-
     fn get_closest_nodes(&self, hash_piece: &HashPiece) -> Vec<Node> {
         let k = self.config.read().unwrap().k;
-        let mut nodes = Vec::with_capacity(k);
-        if self.support_ipv4 {
-            nodes.extend(self.routing_table4.closest(hash_piece, k));
-        }
-        if self.support_ipv6 {
-            nodes.extend(self.routing_table6.closest(hash_piece, k));
-        }
+        let nodes = Vec::with_capacity(k);
+        self.routing_table.closest(hash_piece, k, |node| {
+            if self.support_ipv4 {
+                return node.peer_address.0.is_ipv4();
+            }
+            if self.support_ipv6 {
+                return node.peer_address.0.is_ipv6();
+            }
+            false
+        });
         nodes
     }
 
@@ -199,7 +178,7 @@ impl<S: PeerStore> DhtServer<S> {
             ..Default::default()
         };
         self.send_krpc_message(message, addr.0).await?;
-        self.transaction_manager.insert(self.tran_seq, tran);
+        self.trans.insert(self.tran_seq, tran);
         Ok(())
     }
 
@@ -223,7 +202,6 @@ impl<S: PeerStore> DhtServer<S> {
             want,
             ..Default::default()
         };
-        self.tran_seq += 1;
         let message = KrpcMessage {
             t: self.tran_seq.to_string(),
             y: MessageType::Query,
@@ -232,7 +210,7 @@ impl<S: PeerStore> DhtServer<S> {
             ..Default::default()
         };
         self.send_krpc_message(message, addr.0).await?;
-        self.transaction_manager.insert(self.tran_seq, tran);
+        self.trans.insert(self.tran_seq, tran);
         Ok(())
     }
 
@@ -265,7 +243,7 @@ impl<S: PeerStore> DhtServer<S> {
             ..Default::default()
         };
         self.send_krpc_message(message, node.peer_address.0).await?;
-        self.transaction_manager.insert(self.tran_seq, tran.clone());
+        self.trans.insert(self.tran_seq, tran.clone());
         Ok(())
     }
 
@@ -311,7 +289,7 @@ impl<S: PeerStore> DhtServer<S> {
                 a: Some(query),
                 ..Default::default()
             };
-            self.transaction_manager.insert(self.tran_seq, tran.clone());
+            self.trans.insert(self.tran_seq, tran.clone());
             self.send_krpc_message(message, node.peer_address.0).await?;
         }
         Ok(())
@@ -322,7 +300,7 @@ impl<S: PeerStore> DhtServer<S> {
         let err = Error::KrpcErr(e);
         let seq: usize = message.t.parse()?;
         let tran = self
-            .transaction_manager
+            .trans
             .remove(&seq)
             .ok_or(Error::TransactionNotFound(seq))?;
         // ignore if client dropped
@@ -333,12 +311,12 @@ impl<S: PeerStore> DhtServer<S> {
     async fn on_response(&mut self, mut message: KrpcMessage, addr: SocketAddr) -> Result<()> {
         let tran_id: usize = message.t.parse()?;
         let tran = self
-            .transaction_manager
+            .trans
             .remove(&tran_id)
             .ok_or(Error::TransactionNotFound(tran_id))?;
         let mut rsp = message.r.take().ok_or(Error::ProtocolErr)?;
         if message.ro != Some(true) {
-            self.insert_node(Node {
+            self.routing_table.insert(Node {
                 id: rsp.id.clone(),
                 peer_address: PeerAddress(addr),
             });
@@ -379,11 +357,7 @@ impl<S: PeerStore> DhtServer<S> {
             if &n.id == tran.target.as_ref().unwrap() {
                 find_node = Some(n.clone());
             }
-            if self.support_ipv4
-                && !self.insert_node(n.clone())
-                && find_node.is_none()
-                && tran.depth > 0
-            {
+            if self.support_ipv4 && find_node.is_none() && tran.depth > 0 {
                 self.send_find_node(n.peer_address, tran.target.clone().unwrap(), tran.clone())
                     .await?;
             }
@@ -396,11 +370,7 @@ impl<S: PeerStore> DhtServer<S> {
             if &n.id == tran.target.as_ref().unwrap() {
                 find_node = Some(n.clone());
             }
-            if self.support_ipv6
-                && !self.insert_node(n.clone())
-                && find_node.is_none()
-                && tran.depth > 0
-            {
+            if self.support_ipv6 && find_node.is_none() && tran.depth > 0 {
                 self.send_find_node(n.peer_address, tran.target.clone().unwrap(), tran.clone())
                     .await?;
             }
@@ -416,10 +386,8 @@ impl<S: PeerStore> DhtServer<S> {
         mut rsp: KrpcResponse,
         mut tran: Transaction,
     ) -> Result<()> {
-        if let Some(mut addrs) = rsp.values.take() {
-            for addr in addrs.0.drain(..) {
-                let _ = tran.callback(Ok(DhtRsp::GetPeers(addr))).await;
-            }
+        if let Some(addrs) = rsp.values.take() {
+            let _ = tran.callback(Ok(DhtRsp::GetPeers(addrs.0))).await;
             return Ok(());
         }
         tran.depth -= 1;
@@ -430,7 +398,7 @@ impl<S: PeerStore> DhtServer<S> {
                 continue;
             }
             tran.insert_id(n.id.clone());
-            if self.support_ipv4 && !self.insert_node(n.clone()) && tran.depth > 0 {
+            if self.support_ipv4 && tran.depth > 0 {
                 self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
                     .await?;
             }
@@ -440,7 +408,7 @@ impl<S: PeerStore> DhtServer<S> {
                 continue;
             }
             tran.insert_id(n.id.clone());
-            if self.support_ipv6 && !self.insert_node(n.clone()) && tran.depth > 0 {
+            if self.support_ipv6 && tran.depth > 0 {
                 self.send_get_peers(n, tran.target.clone().unwrap(), tran.clone())
                     .await?;
             }
@@ -519,27 +487,25 @@ impl<S: PeerStore> DhtServer<S> {
                 want_ipv6 = true;
             }
         }
-        if !want_ipv4 && !want_ipv6 {
-            if addr.is_ipv4() {
-                rsp.nodes = Some(CompactNodes::from(
-                    self.routing_table4.closest(&target, k).into_iter(),
-                ));
-            } else {
-                rsp.nodes6 = Some(CompactNodes::from(
-                    self.routing_table6.closest(&target, k).into_iter(),
-                ));
-            }
-        }
-        if want_ipv4 {
-            rsp.nodes = Some(CompactNodes::from(
-                self.routing_table4.closest(&target, k).into_iter(),
-            ));
-        }
-        if want_ipv6 {
-            rsp.nodes6 = Some(CompactNodes::from(
-                self.routing_table6.closest(&target, k).into_iter(),
-            ));
-        }
+        rsp.nodes = Some(CompactNodes::from(
+            self.routing_table
+                .closest(&target, k, |node| {
+                    if !want_ipv4 && !want_ipv6 {
+                        if addr.is_ipv4() {
+                            node.peer_address.0.is_ipv4()
+                        } else {
+                            node.peer_address.0.is_ipv6()
+                        }
+                    } else if want_ipv4 && want_ipv6 {
+                        true
+                    } else if want_ipv4 {
+                        node.peer_address.0.is_ipv4()
+                    } else {
+                        node.peer_address.0.is_ipv6()
+                    }
+                })
+                .into_iter(),
+        ));
         let message = KrpcMessage {
             t: tran_id,
             y: MessageType::Response,
@@ -583,74 +549,44 @@ impl<S: PeerStore> DhtServer<S> {
                 want_ipv6 = true;
             }
         }
-        if !want_ipv4 && !want_ipv6 {
-            if addr.is_ipv4() {
-                rsp.values = Some(CompactAddresses::from(
-                    self.peer_store
-                        .get(&info_hash, k)
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .filter_map(|update_node| {
+
+        rsp.values = Some(CompactAddresses::from(
+            self.peer_store
+                .get(&info_hash, k)
+                .unwrap_or(Vec::new())
+                .into_iter()
+                .filter_map(|update_node| {
+                    if !want_ipv4 && !want_ipv6 {
+                        if addr.is_ipv4() {
                             if update_node.peer_address.0.is_ipv4() {
                                 Some(update_node.peer_address)
                             } else {
                                 None
                             }
-                        }),
-                ));
-            } else {
-                rsp.values = Some(CompactAddresses::from(
-                    self.peer_store
-                        .get(&info_hash, k)
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .filter_map(|update_node| {
+                        } else {
                             if update_node.peer_address.0.is_ipv6() {
                                 Some(update_node.peer_address)
                             } else {
                                 None
                             }
-                        }),
-                ));
-            }
-        }
-        if want_ipv4 && want_ipv6 {
-            rsp.values = Some(CompactAddresses::from(
-                self.peer_store
-                    .get(&info_hash, k)
-                    .unwrap_or(Vec::new())
-                    .into_iter()
-                    .map(|update_node| update_node.peer_address),
-            ));
-        } else if want_ipv4 {
-            rsp.values = Some(CompactAddresses::from(
-                self.peer_store
-                    .get(&info_hash, k)
-                    .unwrap_or(Vec::new())
-                    .into_iter()
-                    .filter_map(|update_node| {
+                        }
+                    } else if want_ipv4 && want_ipv6 {
+                        Some(update_node.peer_address)
+                    } else if want_ipv4 {
                         if update_node.peer_address.0.is_ipv4() {
                             Some(update_node.peer_address)
                         } else {
                             None
                         }
-                    }),
-            ));
-        } else {
-            rsp.values = Some(CompactAddresses::from(
-                self.peer_store
-                    .get(&info_hash, k)
-                    .unwrap_or(Vec::new())
-                    .into_iter()
-                    .filter_map(|update_node| {
+                    } else {
                         if update_node.peer_address.0.is_ipv6() {
                             Some(update_node.peer_address)
                         } else {
                             None
                         }
-                    }),
-            ));
-        }
+                    }
+                }),
+        ));
         rsp.token = Some(self.token_manager.create_token(None, &PeerAddress(addr)));
         let message = KrpcMessage {
             t: tran_id,
@@ -714,32 +650,27 @@ impl<S: PeerStore> DhtServer<S> {
                     return Ok(true);
                 }
                 DhtReq::Ping(addr) => {
-                    self.send_ping(addr, Transaction::new(Some(cb), 0, None, QueryType::Ping))
+                    self.send_ping(addr, Transaction::new(cb, 0, None, QueryType::Ping))
                         .await?;
                 }
                 DhtReq::FindNode(addr, target) => {
                     self.send_find_node(
                         addr,
                         target.clone(),
-                        Transaction::new(Some(cb), depth, Some(target), QueryType::FindNode),
+                        Transaction::new(cb, depth, Some(target), QueryType::FindNode),
                     )
                     .await?;
                 }
                 DhtReq::GetPeers(info_hash) => {
-                    let tran = Transaction::new(
-                        Some(cb),
-                        depth,
-                        Some(info_hash.clone()),
-                        QueryType::GetPeers,
-                    );
+                    let tran =
+                        Transaction::new(cb, depth, Some(info_hash.clone()), QueryType::GetPeers);
                     for n in self.get_closest_nodes(&info_hash) {
                         self.send_get_peers(n, info_hash.clone(), tran.clone())
                             .await?;
                     }
                 }
                 DhtReq::AnnouncePeer(info_hash) => {
-                    let tran =
-                        Transaction::new(Some(cb.clone()), depth, None, QueryType::AnnouncePeer);
+                    let tran = Transaction::new(cb, depth, None, QueryType::AnnouncePeer);
                     for n in self.get_closest_nodes(&info_hash) {
                         match self
                             .send_announce_peer(n, info_hash.clone(), tran.clone())
@@ -765,21 +696,20 @@ impl<S: PeerStore> DhtServer<S> {
 
     async fn refresh(&mut self) -> Result<()> {
         let mut removed_nodes = Vec::new();
-        if self.support_ipv4 {
-            removed_nodes.extend(self.routing_table4.refresh());
-        }
-        if self.support_ipv6 {
-            removed_nodes.extend(self.routing_table6.refresh());
-        }
+        removed_nodes.extend(self.routing_table.refresh());
         for node in removed_nodes.iter() {
-            for tran in self.transaction_manager.remove_by_node(&node.id) {
-                let _ = tran.callback(Err(Error::TransactionTimeout)).await;
-                error!("tran {:?}, timeout", tran);
-            }
+            let (cb, _) = bounded(1);
+            self.send_ping(
+                node.peer_address.clone(),
+                Transaction::new(cb, 0, None, QueryType::Ping),
+            )
+            .await?;
         }
-        for tran in self
-            .transaction_manager
-            .refresh(self.config.read().unwrap().max_transaction_time_out)
+        let now = Instant::now();
+        let max_transaction_time_out = self.config.read().unwrap().max_transaction_time_out;
+        for (_, tran) in self
+            .trans
+            .drain_filter(|_, tran| now - tran.last_updated > max_transaction_time_out)
         {
             let _ = tran.callback(Err(Error::TransactionTimeout)).await;
             error!("tran {:?}, timeout", tran);
@@ -868,7 +798,7 @@ impl DhtClient {
         }
     }
 
-    pub async fn get_peers(&self, info_hash: HashPiece) -> impl Stream<Item = PeerAddress> {
+    pub async fn get_peers(&self, info_hash: HashPiece) -> Result<Vec<PeerAddress>> {
         let (sender, receiver) = unbounded();
         match self
             .sender
@@ -882,10 +812,14 @@ impl DhtClient {
                 e.into_inner()
             ),
         }
-        receiver.filter_map(|rsp| match rsp {
-            Ok(DhtRsp::GetPeers(addr)) => Some(addr),
-            _ => None,
-        })
+        match receiver.recv().await? {
+            Ok(DhtRsp::GetPeers(addr)) => Ok(addr),
+            Ok(rsp) => {
+                error!("expect receive find_node, but receive {:?}", rsp);
+                Err(Error::ProtocolErr)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn announce(&self, info_hash: HashPiece) -> Result<()> {
@@ -1091,8 +1025,9 @@ mod tests {
 
             assert!(or(server.run(), async move {
                 assert!(client.ping("127.0.0.1:6881").await.is_ok());
-                let mut fut = client.get_peers(info_hash1.clone()).await;
-                while let Some(addr) = fut.next().await {
+                let res = client.get_peers(info_hash1.clone()).await;
+                assert!(res.is_ok());
+                for addr in res.unwrap() {
                     assert_eq!(addr, PeerAddress("127.0.0.1:1".parse().unwrap()));
                 }
                 Ok(())
@@ -1137,13 +1072,13 @@ mod tests {
 
             assert!(or(server.run(), async move {
                 assert!(client.ping("127.0.0.1:6881").await.is_ok());
-                let mut fut = client.get_peers(info_hash1.clone()).await;
-                while let Some(_) = fut.next().await {
-                    assert!(false);
-                }
+                let mut res = client.get_peers(info_hash1.clone()).await;
+                assert!(res.is_ok());
+                assert!(res.unwrap().is_empty());
                 assert!(client.announce(info_hash1.clone()).await.is_ok());
-                let mut fut = client.get_peers(info_hash1.clone()).await;
-                while let Some(addr) = fut.next().await {
+                let mut res = client.get_peers(info_hash1.clone()).await;
+                assert!(res.is_ok());
+                for addr in res.unwrap() {
                     assert_eq!(addr, PeerAddress("127.0.0.1:6882".parse().unwrap()));
                 }
                 Ok(())

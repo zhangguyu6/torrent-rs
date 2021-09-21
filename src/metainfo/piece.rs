@@ -1,22 +1,22 @@
+use super::error::Result;
 use super::Info;
 use crate::bencode::{to_bytes, Value};
-use crate::error::Result;
-use crate::utils::Chains;
+use async_std::{
+    io::{self, Read, ReadExt},
+    task::ready,
+};
 use rand::random;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use sha1::{Digest, Sha1};
-use smol::{
-    fs::OpenOptions,
-    io::{AsyncReadExt, BufReader},
-};
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::BitXor;
-use std::path::PathBuf;
+use std::pin::Pin;
 use std::result::Result as StdResult;
+use std::task::{Context, Poll};
 use std::usize;
 
 pub const PIECE_SIZE_256_KB: u64 = 1024 * 256;
@@ -25,6 +25,7 @@ pub const PIECE_SIZE_1M: u64 = 2 * PIECE_SIZE_512_KB;
 pub const PIECE_SIZE_2M: u64 = 2 * PIECE_SIZE_1M;
 pub(crate) const ID_LEN: usize = 20;
 
+/// HashPiece represents the SHA1 hash of the piece at the corresponding index.
 #[derive(Debug, PartialEq, Eq, Default, Clone, PartialOrd, Ord, Hash)]
 pub struct HashPiece([u8; ID_LEN]);
 
@@ -38,19 +39,11 @@ impl HashPiece {
         Self(hash_val)
     }
 
-    pub(crate) fn leading_zeros(&self) -> usize {
-        let mut zeros = 0;
-        for v in self.0.iter() {
-            zeros += v.leading_zeros() as usize;
-            if *v != 0 {
-                break;
-            }
-        }
-        zeros
-    }
-
-    pub(crate) fn bits(&self) -> usize {
-        ID_LEN * 8 - self.leading_zeros() - 1
+    /// Returns the number of zero in the binary representation of HashPiece.
+    pub fn count_zeros(&self) -> usize {
+        self.0
+            .iter()
+            .fold(0, |res, byte| byte.count_zeros() as usize + res)
     }
 }
 
@@ -115,7 +108,18 @@ impl<'de> Deserialize<'de> for HashPiece {
     }
 }
 
+impl From<&[u8]> for HashPiece {
+    /// Create HashPieces by hashing the given bytes.
+    fn from(bytes: &[u8]) -> Self {
+        let mut hasher = Sha1::new();
+        hasher.update(bytes);
+        let hash_val: [u8; 20] = hasher.finalize().into();
+        HashPiece::new(hash_val)
+    }
+}
+
 impl From<Info> for HashPiece {
+    /// Create HashPieces by hashing the Info dictionary.
     fn from(info: Info) -> Self {
         let buf = to_bytes(&info).unwrap();
         let mut hasher = Sha1::new();
@@ -126,6 +130,7 @@ impl From<Info> for HashPiece {
 }
 
 impl From<Value> for HashPiece {
+    /// Create HashPieces by hashing the Bencode Value.
     fn from(value: Value) -> Self {
         let buf = to_bytes(&value).unwrap();
         let mut hasher = Sha1::new();
@@ -147,25 +152,24 @@ impl AsMut<[u8]> for HashPiece {
     }
 }
 
+/// HashPieces represents a concatenation of each piece's SHA-1 hash
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct HashPieces(pub Vec<HashPiece>);
 
 impl HashPieces {
-    pub async fn hashes(mut paths: Vec<PathBuf>, piece_length: u64) -> Result<Self> {
-        assert!(paths.len() >= 1);
+    /// Create HashPieces by hashing the giving piece
+    pub async fn hash_pieces<R: Read + Unpin>(
+        piece_readers: Vec<R>,
+        piece_length: u64,
+    ) -> Result<Self> {
+        assert!(piece_readers.len() >= 1);
         let mut hasher = Sha1::new();
         let mut hash_vec = Vec::new();
         let mut buf: Vec<u8> = vec![0; piece_length as usize];
-        let mut readers = Vec::new();
-        for p in paths.drain(..) {
-            let f = OpenOptions::new().read(true).open(p).await?;
-            readers.push(f);
-        }
-        let mut reader_chains =
-            BufReader::with_capacity(piece_length as usize, Chains::new(readers));
+        let mut readers = Chains::new(piece_readers);
         let mut index = 0;
         loop {
-            match reader_chains.read(&mut buf[index..]).await? {
+            match readers.read(&mut buf[index..]).await? {
                 0 => {
                     if index != 0 {
                         let hash_chunk = HashPiece(hasher.finalize().into());
@@ -175,7 +179,7 @@ impl HashPieces {
                 }
                 n => {
                     hasher.update(&buf[index..index + n]);
-                    if n == piece_length as usize {
+                    if index == piece_length as usize {
                         index = 0;
                         let hash_chunk = HashPiece(hasher.finalize().into());
                         hash_vec.push(hash_chunk);
@@ -235,13 +239,76 @@ impl<'de> Deserialize<'de> for HashPieces {
     }
 }
 
+struct Chains<R> {
+    readers: Vec<R>,
+    last_active: usize,
+}
+
+impl<R> Chains<R> {
+    fn new(readers: Vec<R>) -> Self {
+        assert!(!readers.is_empty());
+        let last_active = 0;
+        Self {
+            readers,
+            last_active,
+        }
+    }
+}
+
+impl<R: fmt::Debug> fmt::Debug for Chains<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Chains").field("r", &self.readers).finish()
+    }
+}
+
+impl<R: Read + Unpin> Read for Chains<R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let last_active = self.last_active;
+            let max_last_active = self.readers.len() - 1;
+            let readers: &mut R = self.readers.get_mut(last_active).unwrap();
+            match ready!(Pin::new(readers).poll_read(cx, buf)) {
+                Ok(0) if !buf.is_empty() => {
+                    if last_active == max_last_active {
+                        return Poll::Ready(Ok(0));
+                    }
+                    if last_active < max_last_active {
+                        self.last_active += 1;
+                    }
+                }
+                Ok(n) => return Poll::Ready(Ok(n)),
+                Err(err) => return Poll::Ready(Err(err)),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bencode::{from_bytes, to_bytes};
-    use smol::block_on;
+    use async_std::fs::OpenOptions;
+    use async_std::task::block_on;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_chains() {
+        let input_a: &[u8] = b"hello";
+        let input_b: &[u8] = b"world";
+        let mut chains = Chains::new(vec![input_a, input_b]);
+        let mut buf = Vec::new();
+        block_on(async move {
+            let result = chains.read_to_end(&mut buf).await;
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), input_a.len() + input_b.len());
+            assert_eq!(buf.as_slice(), &b"helloworld"[..]);
+        })
+    }
 
     #[test]
     fn test_hashvec() {
@@ -268,7 +335,8 @@ mod tests {
         let p = tmpfile.into_temp_path();
         let path = p.to_path_buf();
         block_on(async {
-            let hashes = HashPieces::hashes(vec![path], 1024).await;
+            let reader = OpenOptions::new().read(true).open(path).await.unwrap();
+            let hashes = HashPieces::hash_pieces(vec![reader], 1024).await;
             let mut hasher = Sha1::new();
             hasher.update("Hello World!".as_bytes());
             let v: [u8; 20] = hasher.finalize().into();

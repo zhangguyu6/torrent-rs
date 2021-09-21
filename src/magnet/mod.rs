@@ -1,9 +1,11 @@
-use super::{HashPiece, PeerAddress};
-use crate::{
-    error::Error,
-    metainfo::{meta::MetaInfo, Info},
-};
+//! This moduie implements magnet URI format defined in https://www.bittorrent.org/beps/bep_0009.html
+
+mod error;
+
+use crate::metainfo::{HashPiece, PeerAddress};
+use crate::metainfo::{Info, MetaInfo};
 use data_encoding::BASE32;
+use error::{MagnetError, Result};
 use hex;
 use std::{
     convert::{TryFrom, TryInto},
@@ -18,13 +20,12 @@ const V1_PREFIX: &'static str = "urn:btih:";
 /// see bep 9
 #[derive(Debug)]
 pub struct MagnetLink {
-    /// xt
     info_hash: HashPiece,
-    /// tr
+    /// The tracker url.
     trackers: Vec<Url>,
-    /// dn
+    /// The display name that may be used by the client to display while waiting for metadata.
     name: String,
-    /// x.pe
+    /// The peer address.
     peers: Vec<PeerAddress>,
 }
 
@@ -60,8 +61,8 @@ impl From<MetaInfo> for MagnetLink {
 }
 
 impl TryFrom<Url> for MagnetLink {
-    type Error = Error;
-    fn try_from(value: Url) -> Result<Self, Self::Error> {
+    type Error = MagnetError;
+    fn try_from(value: Url) -> Result<Self> {
         if value.scheme() == MAGNET {
             let mut info_hash = HashPiece::default();
             let mut trackers = Vec::new();
@@ -69,22 +70,29 @@ impl TryFrom<Url> for MagnetLink {
             let mut peers = Vec::new();
             for (key, val) in value.query_pairs() {
                 match key.as_ref() {
-                    "xt" => match &val[0..V1_PREFIX.len()] {
-                        V1_PREFIX => {
-                            let encoded = &val[V1_PREFIX.len()..];
-                            if encoded.len() == 40 {
-                                hex::decode_to_slice(encoded, info_hash.as_mut())?;
-                            } else if encoded.len() == 32 {
-                                match BASE32.decode_mut(encoded.as_bytes(), info_hash.as_mut()) {
-                                    Ok(_) => {}
-                                    Err(e) => return Err(Error::from(e.error)),
-                                }
-                            } else {
-                                return Err(Error::BrokenMagnetLinkErr(value));
-                            }
+                    "xt" => {
+                        if val.len() < V1_PREFIX.len() {
+                            return Err(MagnetError::BrokenMagnetLink(value));
                         }
-                        _ => return Err(Error::BrokenMagnetLinkErr(value)),
-                    },
+                        match &val[0..V1_PREFIX.len()] {
+                            V1_PREFIX => {
+                                let encoded = &val[V1_PREFIX.len()..];
+                                if encoded.len() == 40 {
+                                    hex::decode_to_slice(encoded, info_hash.as_mut())?;
+                                } else if encoded.len() == 32 {
+                                    match BASE32.decode_mut(encoded.as_bytes(), info_hash.as_mut())
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => return Err(MagnetError::from(e.error)),
+                                    }
+                                } else {
+                                    return Err(MagnetError::BrokenMagnetLink(value));
+                                }
+                            }
+                            _ => return Err(MagnetError::BrokenMagnetLink(value)),
+                        }
+                    }
+
                     "tr" => {
                         trackers.push(Url::from_str(val.as_ref())?);
                     }
@@ -105,22 +113,22 @@ impl TryFrom<Url> for MagnetLink {
                 peers,
             })
         } else {
-            Err(Error::BrokenMagnetLinkErr(value))
+            Err(MagnetError::BrokenMagnetLink(value))
         }
     }
 }
 
 impl TryInto<Url> for MagnetLink {
-    type Error = Error;
-    fn try_into(mut self) -> Result<Url, Self::Error> {
+    type Error = MagnetError;
+    fn try_into(mut self) -> Result<Url> {
         let mut link = Url::parse(format!("{}:", MAGNET).as_str())?;
-        let mut query_pairs = link.query_pairs_mut();
         let hex_hash = hex::encode(self.info_hash.as_mut());
-        query_pairs.append_pair("xt", &hex_hash);
+        link.set_query(Some(format!("xt=urn:btih:{}", hex_hash).as_str()));
+        let mut query_pairs = link.query_pairs_mut();
+        query_pairs.append_pair("dn", &self.name);
         for track in self.trackers {
             query_pairs.append_pair("tr", track.as_str());
         }
-        query_pairs.append_pair("dn", &self.name);
         for peer in self.peers {
             query_pairs.append_pair("x.pe", &peer.to_string());
         }
@@ -140,7 +148,7 @@ mod tests {
         let url = Url::parse("magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert!(url.is_ok());
         assert!(MagnetLink::try_from(url.unwrap()).is_ok());
-        let raw_torrent = include_bytes!("example/bootstrap.dat.torrent");
+        let raw_torrent = include_bytes!("example/debian-11.0.0-amd64-netinst.iso.torrent");
         let metainfo = from_bytes::<MetaInfo>(raw_torrent);
         assert!(metainfo.is_ok());
         let metainfo = metainfo.unwrap();
@@ -150,6 +158,6 @@ mod tests {
         let url = mgn.try_into();
         assert!(url.is_ok());
         let url: Url = url.unwrap();
-        assert_eq!(url.as_str(),"magnet:?xt=36719ba2cecf9f3bd7c5abfb7a88e939611b536c&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&dn=bootstrap.dat");
+        assert_eq!(url.as_str(),"magnet:?xt=urn:btih:3b4bd6f8296403dfebd41062f4658f5b61d2bc26&dn=debian-11.0.0-amd64-netinst.iso&tr=http%3A%2F%2Fbttracker.debian.org%3A6969%2Fannounce");
     }
 }

@@ -1,9 +1,14 @@
+//! This moduie implements bencoding defined in https://www.bittorrent.org/beps/bep_0003.html
 mod de;
-mod ser;
-mod value;
-
 pub use de::{from_bytes, from_str, Deserializer};
+
+mod error;
+pub use error::BencodeError;
+
+mod ser;
 pub use ser::{to_bytes, to_str, Serializer};
+
+mod value;
 pub use value::{from_value, to_value, Value};
 
 #[cfg(test)]
@@ -31,9 +36,7 @@ mod tests {
     }
     fn test_bencode_ser_de<'a, T: Serialize + Deserialize<'a> + std::fmt::Debug + Eq>(a: &T) {
         let buf = to_bytes(a).unwrap();
-        println!("{:?}", to_str(a));
         let b = from_bytes::<T>(buf.as_ref()).unwrap();
-        println!("{:?}", to_str(&b));
         assert_eq!(a, &b);
     }
     #[test]
@@ -164,7 +167,7 @@ mod tests {
     }
     #[test]
     fn test_ser_de_tuple() {
-        // https://github.com/serde-rs/serde/issues/1413
+        // See https://github.com/serde-rs/serde/issues/1413
         // Deserialize &str is difficult
         let a = (1, "a".to_string());
         test_bencode_ser_de(&a);
@@ -184,7 +187,7 @@ mod tests {
         enum V {
             A(i64),
             B(i64),
-        };
+        }
         test_bencode_ser_de(&V::A(0));
     }
     #[test]
@@ -193,7 +196,7 @@ mod tests {
         enum V {
             A(i64, i64),
             B(i64, i64),
-        };
+        }
         test_bencode_ser_de(&V::A(0, 1));
     }
     #[test]
@@ -202,7 +205,7 @@ mod tests {
         enum V {
             A { a: i64, b: i64 },
             B { c: i64, d: i64 },
-        };
+        }
         test_bencode_ser_de(&V::A { a: 0, b: 1 });
     }
 }

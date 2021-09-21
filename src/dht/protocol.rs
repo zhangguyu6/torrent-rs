@@ -1,30 +1,10 @@
-use crate::error::Result;
-use crate::krpc::KrpcMessage;
-use crate::metainfo::{HashPiece, Node, PeerAddress};
-use smol::channel::Sender;
-use std::net::SocketAddr;
+use crate::krpc::Node;
+use crate::metainfo::{HashPiece, PeerAddress};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DhtReq {
-    Ping(PeerAddress),
-    FindNode(PeerAddress, HashPiece),
-    GetPeers(HashPiece),
-    AnnouncePeer(HashPiece),
-    ShutDown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DhtRsp {
+pub(crate) enum DhtRsp {
     Pong(HashPiece),
     FindNode(Option<Node>),
-    GetPeers(PeerAddress),
+    GetPeers(Vec<PeerAddress>),
     Announced,
-    ShutDown,
-}
-
-#[derive(Debug)]
-pub enum DhtMessage {
-    Req(DhtReq, Sender<Result<DhtRsp>>),
-    Refresh,
-    Message(KrpcMessage, SocketAddr),
 }
