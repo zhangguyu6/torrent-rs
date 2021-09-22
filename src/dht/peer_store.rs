@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::krpc::Node;
-use crate::metainfo::HashPiece;
+use crate::metainfo::{HashPiece, PeerAddress};
 use std::collections::{HashMap, HashSet};
 
 /// Store Peer announced info hash before
@@ -10,7 +10,9 @@ pub trait PeerStore {
     /// remove bad peer
     fn remove(&mut self, id: &HashPiece) -> Result<Option<Node>>;
     /// get peers by info_hash
-    fn get(&self, info_hash: &HashPiece, max: usize) -> Result<Vec<Node>>;
+    fn peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
+    where
+        P: Fn(&Node) -> bool;
 }
 
 #[derive(Debug, Default)]
@@ -59,18 +61,23 @@ impl PeerStore for MemPeerStore {
         Ok(None)
     }
 
-    fn get(&self, info_hash: &HashPiece, max: usize) -> Result<Vec<Node>> {
-        let mut nodes = Vec::with_capacity(max);
+    fn peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
+    where
+        P: Fn(&Node) -> bool,
+    {
+        let mut nodes = Vec::default();
         if let Some(ids) = self.info_to_node.get(info_hash) {
             for id in ids {
                 if nodes.len() == max {
                     break;
                 }
                 if let Some((node, _)) = self.node_to_info.get(id) {
-                    nodes.push(node.clone());
+                    if f(node) {
+                        nodes.push(node.peer_address.clone());
+                    }
                 }
             }
         }
-        Ok(nodes)
+        nodes
     }
 }

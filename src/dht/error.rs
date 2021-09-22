@@ -16,4 +16,6 @@ pub enum DhtError {
     Address(#[from] AddrParseError),
     #[error("Bencode {0}")]
     Bencode(#[from] BencodeError),
+    #[error("Protocol {0}")]
+    Protocol(String),
 }
