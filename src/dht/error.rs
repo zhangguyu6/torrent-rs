@@ -1,4 +1,6 @@
 use crate::bencode::BencodeError;
+use crate::krpc::KrpcError;
+use async_std::channel::RecvError;
 use std::io;
 use std::net::AddrParseError;
 use std::result;
@@ -16,6 +18,14 @@ pub enum DhtError {
     Address(#[from] AddrParseError),
     #[error("Bencode {0}")]
     Bencode(#[from] BencodeError),
+    #[error("Krpc {0}")]
+    Krpc(#[from] KrpcError),
     #[error("Protocol {0}")]
     Protocol(String),
+    #[error("InVaildToken")]
+    InVaildToken,
+    #[error("TransactionNotFound")]
+    TransactionNotFound,
+    #[error("ChannelClosed {0}")]
+    ChannelClose(#[from] RecvError),
 }

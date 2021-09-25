@@ -1,21 +1,22 @@
 use crate::krpc::Node;
 use crate::metainfo::{HashPiece, ID_LEN};
-use std::cmp;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
-struct NodeWithUpdateTime {
+struct NodeExt {
     pub last_updated: Instant,
     pub node: Node,
+    pub no_responding_times: usize,
 }
 
-impl NodeWithUpdateTime {
+impl NodeExt {
     fn new(node: Node, now: Option<Instant>) -> Self {
         let now = now.unwrap_or(Instant::now());
         Self {
             last_updated: now,
             node: node,
+            no_responding_times: 0,
         }
     }
 
@@ -23,11 +24,15 @@ impl NodeWithUpdateTime {
         let now = now.unwrap_or(Instant::now());
         now - self.last_updated > questionable_interval
     }
+
+    fn is_dead(&self) -> bool {
+        self.no_responding_times >= 3
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct Bucket {
-    nodes: HashMap<HashPiece, NodeWithUpdateTime>,
+    nodes: HashMap<HashPiece, NodeExt>,
     last_updated: Instant,
     k: usize,
     questionable_interval: Duration,
@@ -43,24 +48,27 @@ impl Bucket {
         }
     }
 
-    fn insert(&mut self, node: Node) {
+    /// If the map did not have this node present, return true
+    fn insert(&mut self, node: Node) -> bool {
         self.last_updated = Instant::now();
         // node already exists in the routing bucket
         if let Some(node_ext) = self.nodes.get_mut(&node.id) {
+            node_ext.no_responding_times = 0;
             // update address and clear trans
             if node_ext.node != node {
                 node_ext.node = node;
             }
             // address is same, just update
             node_ext.last_updated = self.last_updated;
+            return false;
         }
+        self.nodes.retain(|_, node_ext| !node_ext.is_dead());
         // When a bucket is full of known good nodes, no more nodes may be added.
-        else if self.nodes.len() < self.k {
-            self.nodes.insert(
-                node.id.clone(),
-                NodeWithUpdateTime::new(node, Some(self.last_updated)),
-            );
+        if self.nodes.len() < self.k {
+            self.nodes
+                .insert(node.id.clone(), NodeExt::new(node, Some(self.last_updated)));
         }
+        true
     }
 
     fn remove(&mut self, id: &HashPiece) -> Option<Node> {
@@ -109,16 +117,17 @@ impl RoutingTable {
     where
         P: Fn(&Node) -> bool,
     {
-        let mut nodes: Vec<(&HashPiece, &NodeWithUpdateTime)> = self
-            .buckets
-            .iter()
-            .flat_map(|b| b.nodes.iter().filter(|(_, node_ext)| f(&node_ext.node)))
-            .collect();
-        nodes.sort_by_key(|(k, _)| (*k) ^ target);
-        nodes[0..cmp::min(max, nodes.len())]
-            .iter()
-            .map(|(_, v)| v.node.clone())
-            .collect()
+        let mut nodes = Vec::new();
+        for bucket in self.buckets.iter() {
+            for (_, node_ext) in bucket.nodes.iter() {
+                if f(&node_ext.node) {
+                    nodes.push(node_ext.node.clone());
+                }
+            }
+        }
+        nodes.sort_by_key(|node| &node.id ^ target);
+        nodes.truncate(max);
+        nodes
     }
 
     /// get all questionable nodes in table

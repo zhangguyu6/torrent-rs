@@ -1,5 +1,5 @@
+use super::error::Result;
 use super::DhtRsp;
-use crate::error::Result;
 use crate::krpc::QueryType;
 use crate::metainfo::HashPiece;
 use async_std::channel::Sender;
@@ -36,7 +36,7 @@ impl Transaction {
 
 #[derive(Clone, Debug)]
 pub(crate) struct TransactionManager {
-    trans: HashMap<usize, Transaction>,
+    trans: HashMap<String, Transaction>,
     tran_seq: usize,
 }
 
@@ -53,16 +53,16 @@ impl TransactionManager {
     pub fn insert(&mut self, mut tran: Transaction) -> usize {
         self.tran_seq += 1;
         tran.seq = self.tran_seq;
-        self.trans.insert(self.tran_seq, tran);
+        self.trans.insert(self.tran_seq.to_string(), tran);
         self.tran_seq
     }
-    pub fn get(&self, tran_id: usize) -> Option<&Transaction> {
-        self.trans.get(&tran_id)
+    pub fn get(&self, tran_id: &String) -> Option<&Transaction> {
+        self.trans.get(tran_id)
     }
-    pub fn get_mut(&mut self, tran_id: usize) -> Option<&mut Transaction> {
-        self.trans.get_mut(&tran_id)
+    pub fn get_mut(&mut self, tran_id: &String) -> Option<&mut Transaction> {
+        self.trans.get_mut(tran_id)
     }
-    pub fn remove(&mut self, tran_id: usize) -> Option<Transaction> {
-        self.trans.remove(&tran_id)
+    pub fn remove(&mut self, tran_id: &String) -> Option<Transaction> {
+        self.trans.remove(tran_id)
     }
 }
