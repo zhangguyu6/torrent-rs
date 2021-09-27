@@ -15,6 +15,8 @@ pub struct DhtConfig {
     pub max_token_interval_count: usize,
     /// How long a node becomes questionable
     pub questionable_interval: Duration,
+    /// How long ping questionable nodes
+    pub refresh_interval: Duration,
     /// Recursive query limit
     pub depth: usize,
     /// If true, the port argument should be ignored,
@@ -35,6 +37,7 @@ impl Default for DhtConfig {
             token_interval: Duration::from_secs(30),
             max_token_interval_count: 2,
             questionable_interval: Duration::from_secs(60 * 15),
+            refresh_interval: Duration::from_secs(60 * 1),
             depth: 4,
             implied_port: true,
             local_addr: "127.0.0.1:6881".to_string(),

@@ -1,5 +1,5 @@
 use crate::krpc::Node;
-use crate::metainfo::{HashPiece, ID_LEN};
+use crate::metainfo::{HashPiece, PeerAddress, ID_LEN};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -75,15 +75,16 @@ impl Bucket {
         self.nodes.remove(&id).map(|node_ext| node_ext.node)
     }
 
-    fn questionable_iter(&self) -> impl Iterator<Item = &Node> {
+    fn questionables(&mut self) -> Vec<PeerAddress> {
         let questionable_interval = self.questionable_interval;
-        self.nodes.iter().filter_map(move |(_, node_ext)| {
+        let mut addresses = Vec::default();
+        for (_, node_ext) in self.nodes.iter_mut() {
             if node_ext.is_questionable(None, questionable_interval) {
-                Some(&node_ext.node)
-            } else {
-                None
+                node_ext.no_responding_times += 1;
+                addresses.push(node_ext.node.peer_address.clone())
             }
-        })
+        }
+        addresses
     }
 }
 
@@ -131,13 +132,11 @@ impl RoutingTable {
     }
 
     /// get all questionable nodes in table
-    pub fn questionables(&mut self) -> Vec<Node> {
-        let mut nodes = Vec::new();
-        for bucket in self.buckets.iter() {
-            for node in bucket.questionable_iter() {
-                nodes.push(node.clone());
-            }
+    pub fn questionables(&mut self) -> Vec<PeerAddress> {
+        let mut addresses = Vec::new();
+        for bucket in self.buckets.iter_mut() {
+            addresses.append(&mut bucket.questionables());
         }
-        nodes
+        addresses
     }
 }

@@ -1,6 +1,6 @@
 use crate::bencode::BencodeError;
 use crate::krpc::KrpcError;
-use async_std::channel::RecvError;
+use async_std::{channel::RecvError, future::TimeoutError};
 use std::io;
 use std::net::AddrParseError;
 use std::result;
@@ -28,4 +28,6 @@ pub enum DhtError {
     TransactionNotFound,
     #[error("ChannelClosed {0}")]
     ChannelClose(#[from] RecvError),
+    #[error("Timeout {0}")]
+    Timeout(#[from] TimeoutError),
 }

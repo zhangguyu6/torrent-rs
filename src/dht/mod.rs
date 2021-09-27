@@ -28,19 +28,21 @@ use crate::krpc::{
 };
 use crate::metainfo::{CompactAddresses, HashPiece, PeerAddress};
 use async_std::{
+    future,
     net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket},
-    stream::{Stream, StreamExt},
+    stream::{interval, Stream, StreamExt},
     sync::RwLock,
     task::{spawn, JoinHandle},
 };
 #[cfg(not(test))]
 use log::{debug, error};
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(test)]
 use std::{println as debug, println as error};
 
 /// Dht Sever Instance
-struct Inner<S: PeerStore = MemPeerStore> {
+pub struct Dht<S: PeerStore = MemPeerStore> {
     transaction_mgr: RwLock<TransactionManager>,
     token_mgr: RwLock<TokenManager>,
     routing_table: RwLock<RoutingTable>,
@@ -54,8 +56,8 @@ struct Inner<S: PeerStore = MemPeerStore> {
     refresh_handle: RwLock<Option<JoinHandle<Result<()>>>>,
 }
 
-impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
-    async fn new(config: DhtConfig, peer_store: S) -> Result<Arc<Self>> {
+impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
+    pub async fn new(config: DhtConfig, peer_store: S) -> Result<Arc<Self>> {
         let addr = config
             .local_addr
             .to_socket_addrs()
@@ -98,23 +100,26 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
             rsp_handle: RwLock::new(None),
             refresh_handle: RwLock::new(None),
         };
-        let arc_inner = Arc::new(inner);
-        let arc_inner1 = arc_inner.clone();
-        let rsp_handle = spawn(async move { arc_inner.rsp_loop().await });
-        *arc_inner1.rsp_handle.write().await = Some(rsp_handle);
-        Ok(arc_inner1)
+        let arc_inner0 = Arc::new(inner);
+        let arc_inner1 = arc_inner0.clone();
+        let arc_inner2 = arc_inner0.clone();
+        let rsp_handle = spawn(async move { arc_inner0.rsp_loop().await });
+        let refresh_handle = spawn(async move { arc_inner1.refresh_loop().await });
+        *arc_inner2.rsp_handle.write().await = Some(rsp_handle);
+        *arc_inner2.refresh_handle.write().await = Some(refresh_handle);
+        Ok(arc_inner2)
     }
 
-    async fn close(&self) {
+    pub async fn close(&self) {
         if let Some(rsp_handle) = self.rsp_handle.write().await.take() {
-            let a = rsp_handle.cancel().await;
+            rsp_handle.cancel().await;
         }
         if let Some(refresh_handle) = self.refresh_handle.write().await.take() {
             refresh_handle.cancel().await;
         }
     }
 
-    async fn rsp_loop(&self) -> Result<()> {
+    async fn rsp_loop(self: Arc<Self>) -> Result<()> {
         debug!("start listen on:{}", self.addr);
         let mut buf = [0; MAX_KRPC_MESSAGE_SIZE];
         loop {
@@ -129,6 +134,27 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
                 Err(e) => {
                     error!("self.socket.recv_from failed, e={}", e);
                     break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn refresh_loop(self: Arc<Self>) -> Result<()> {
+        let mut refresh_timer = interval(self.config.refresh_interval);
+        while let Some(_) = refresh_timer.next().await {
+            let mut tasks = Vec::default();
+            for address in self.routing_table.write().await.questionables() {
+                let inner = self.clone();
+                tasks.push(spawn(async move {
+                    let res = future::timeout(Duration::from_secs(5), inner.ping(address)).await?;
+                    res
+                }));
+            }
+            for task in tasks {
+                match task.await {
+                    Ok(_) => {}
+                    Err(e) => error!("refresh failed, e = {}", e),
                 }
             }
         }
@@ -379,7 +405,7 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
         Ok(())
     }
 
-    async fn handle_error(&self, mut message: KrpcMessage, addr: SocketAddr) -> Result<()> {
+    async fn handle_error(&self, mut message: KrpcMessage, _: SocketAddr) -> Result<()> {
         let e = message
             .e
             .take()
@@ -631,7 +657,7 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
         }
     }
 
-    async fn ping(&self, addr: PeerAddress) -> Result<()> {
+    pub async fn ping(&self, addr: PeerAddress) -> Result<()> {
         let (tx, rx) = unbounded();
         let tran = Transaction::new(tx, 0, None, QueryType::Ping);
         self.send_ping(addr, tran).await?;
@@ -645,7 +671,7 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
         }
     }
 
-    async fn find_node(&self, addr: PeerAddress, target: HashPiece) -> Result<Node> {
+    pub async fn find_node(&self, addr: PeerAddress, target: HashPiece) -> Result<Node> {
         let (tx, rx) = unbounded();
         let tran = Transaction::new(
             tx,
@@ -664,7 +690,7 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
         }
     }
 
-    async fn get_peers(
+    pub async fn get_peers(
         &self,
         addr: PeerAddress,
         info_hash: HashPiece,
@@ -683,7 +709,7 @@ impl<S: PeerStore + Send + Sync + 'static> Inner<S> {
         }))
     }
 
-    async fn announce_peer(&self, node: Node, info_hash: HashPiece) -> Result<()> {
+    pub async fn announce_peer(&self, node: Node, info_hash: HashPiece) -> Result<()> {
         let (tx, rx) = unbounded();
         let tran = Transaction::new(tx, 0, None, QueryType::AnnouncePeer);
         self.send_announce_peer(node, info_hash, tran).await?;
@@ -707,7 +733,7 @@ mod tests {
     #[test]
     fn test_dht_create() {
         block_on(async {
-            let inner = Inner::new(DhtConfig::default(), MemPeerStore::default()).await;
+            let inner = Dht::new(DhtConfig::default(), MemPeerStore::default()).await;
             assert!(inner.is_ok());
             sleep(Duration::from_secs(1)).await;
             inner.unwrap().close().await;
