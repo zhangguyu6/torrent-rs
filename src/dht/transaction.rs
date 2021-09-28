@@ -56,12 +56,6 @@ impl TransactionManager {
         self.trans.insert(self.tran_seq.to_string(), tran);
         self.tran_seq
     }
-    pub fn get(&self, tran_id: &String) -> Option<&Transaction> {
-        self.trans.get(tran_id)
-    }
-    pub fn get_mut(&mut self, tran_id: &String) -> Option<&mut Transaction> {
-        self.trans.get_mut(tran_id)
-    }
     pub fn remove(&mut self, tran_id: &String) -> Option<Transaction> {
         self.trans.remove(tran_id)
     }

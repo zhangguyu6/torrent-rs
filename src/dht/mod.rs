@@ -42,6 +42,7 @@ use std::time::Duration;
 use std::{println as debug, println as error};
 
 /// Dht Sever Instance
+#[derive(Debug)]
 pub struct Dht<S: PeerStore = MemPeerStore> {
     transaction_mgr: RwLock<TransactionManager>,
     token_mgr: RwLock<TokenManager>,
@@ -70,6 +71,7 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
         let mut support_ipv6 = false;
         if addr.ip() == dual_stack_ip {
             support_ipv4 = true;
+            support_ipv6 = true;
         } else if addr.is_ipv4() {
             support_ipv4 = true;
         } else {
@@ -107,6 +109,7 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
         let refresh_handle = spawn(async move { arc_inner1.refresh_loop().await });
         *arc_inner2.rsp_handle.write().await = Some(rsp_handle);
         *arc_inner2.refresh_handle.write().await = Some(refresh_handle);
+        arc_inner2.bootstrap().await?;
         Ok(arc_inner2)
     }
 
@@ -657,12 +660,12 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
         }
     }
 
-    pub async fn ping(&self, addr: PeerAddress) -> Result<()> {
+    pub async fn ping(&self, addr: PeerAddress) -> Result<HashPiece> {
         let (tx, rx) = unbounded();
         let tran = Transaction::new(tx, 0, None, QueryType::Ping);
         self.send_ping(addr, tran).await?;
         match rx.recv().await? {
-            Ok(DhtRsp::Pong(_)) => Ok(()),
+            Ok(DhtRsp::Pong(id)) => Ok(id),
             Ok(rsp) => {
                 error!("expect receive ping, but receive {:?}", rsp);
                 Err(DhtError::Protocol("receive unexpected rsp".to_string()))
@@ -722,6 +725,28 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
             Err(e) => Err(e),
         }
     }
+
+    pub async fn bootstrap(&self) -> Result<()> {
+        let (tx, rx) = unbounded();
+        for address in self.config.bootstrap_addrs.iter() {
+            let addr = address.to_socket_addrs().await?.next().unwrap();
+            let tran = Transaction::new(
+                tx.clone(),
+                self.config.depth,
+                Some(self.config.id.clone()),
+                QueryType::FindNode,
+            );
+            let _ = self
+                .send_find_node(PeerAddress(addr), self.config.id.clone(), tran)
+                .await;
+        }
+        rx.close();
+        Ok(())
+    }
+
+    pub async fn dht_node_count(&self) -> usize {
+        self.routing_table.read().await.count()
+    }
 }
 
 #[cfg(test)]
@@ -733,10 +758,16 @@ mod tests {
     #[test]
     fn test_dht_create() {
         block_on(async {
-            let inner = Dht::new(DhtConfig::default(), MemPeerStore::default()).await;
-            assert!(inner.is_ok());
-            sleep(Duration::from_secs(1)).await;
-            inner.unwrap().close().await;
+            let res = Dht::new(DhtConfig::default(), MemPeerStore::default()).await;
+            // dbg!(&res);
+            assert!(res.is_ok());
+            sleep(Duration::from_secs(5)).await;
+            let dht = res.unwrap();
+            let node_count = dht.dht_node_count().await;
+            dbg!(&node_count);
+            assert!(node_count > 0);
+            // dbg!(&dht);
+            dht.close().await;
         });
     }
 }

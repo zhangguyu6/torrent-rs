@@ -71,10 +71,6 @@ impl Bucket {
         true
     }
 
-    fn remove(&mut self, id: &HashPiece) -> Option<Node> {
-        self.nodes.remove(&id).map(|node_ext| node_ext.node)
-    }
-
     fn questionables(&mut self) -> Vec<PeerAddress> {
         let questionable_interval = self.questionable_interval;
         let mut addresses = Vec::default();
@@ -108,6 +104,9 @@ impl RoutingTable {
     }
 
     pub fn insert(&mut self, node: Node) {
+        if node.id == self.id {
+            return;
+        }
         let bucket_index = (&node.id ^ &self.id).count_zeros();
         let bucket = &mut self.buckets[bucket_index];
         bucket.insert(node);
@@ -138,5 +137,11 @@ impl RoutingTable {
             addresses.append(&mut bucket.questionables());
         }
         addresses
+    }
+
+    pub fn count(&self) -> usize {
+        self.buckets
+            .iter()
+            .fold(0, |acc, bucket| acc + bucket.nodes.len())
     }
 }
