@@ -6,38 +6,20 @@ use std::collections::{HashMap, HashSet};
 /// Store Peer announced info hash before
 pub trait PeerStore {
     /// store announced peer
-    fn insert(&mut self, info_hash: HashPiece, node: Node) -> Result<()>;
-    /// remove bad peer
-    fn remove(&mut self, id: &HashPiece) -> Result<Option<Node>>;
+    fn insert_info_hash(&mut self, info_hash: HashPiece, node: Node) -> Result<()>;
     /// get peers by info_hash
-    fn peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
+    fn get_peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
     where
         P: Fn(&Node) -> bool;
 }
 
 #[derive(Debug, Default)]
 pub struct MemPeerStore {
-    node_to_info: HashMap<HashPiece, (Node, HashSet<HashPiece>)>,
-    info_to_node: HashMap<HashPiece, HashSet<HashPiece>>,
+    info_to_node: HashMap<HashPiece, HashSet<Node>>,
 }
 
 impl PeerStore for MemPeerStore {
-    fn insert(&mut self, info_hash: HashPiece, node: Node) -> Result<()> {
-        let infos = match self.node_to_info.get_mut(&node.id) {
-            Some((_, infos)) => infos,
-            None => {
-                self.node_to_info
-                    .insert(node.id.clone(), (node.clone(), HashSet::new()));
-                self.node_to_info
-                    .get_mut(&node.id)
-                    .map(|(_, infos)| infos)
-                    .unwrap()
-            }
-        };
-        if infos.contains(&info_hash) {
-            return Ok(());
-        }
-        infos.insert(info_hash.clone());
+    fn insert_info_hash(&mut self, info_hash: HashPiece, node: Node) -> Result<()> {
         let nodes = match self.info_to_node.get_mut(&info_hash) {
             Some(nodes) => nodes,
             None => {
@@ -45,36 +27,22 @@ impl PeerStore for MemPeerStore {
                 self.info_to_node.get_mut(&info_hash).unwrap()
             }
         };
-        nodes.insert(node.id);
+        nodes.insert(node);
         Ok(())
     }
 
-    fn remove(&mut self, id: &HashPiece) -> Result<Option<Node>> {
-        if let Some((node, mut infos)) = self.node_to_info.remove(id) {
-            for info in infos.drain() {
-                if let Some(nodes) = self.info_to_node.get_mut(&info) {
-                    nodes.remove(&node.id);
-                }
-            }
-            return Ok(Some(node));
-        }
-        Ok(None)
-    }
-
-    fn peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
+    fn get_peer_addresses<P>(&self, info_hash: &HashPiece, max: usize, f: P) -> Vec<PeerAddress>
     where
         P: Fn(&Node) -> bool,
     {
         let mut nodes = Vec::default();
         if let Some(ids) = self.info_to_node.get(info_hash) {
-            for id in ids {
+            for node in ids {
                 if nodes.len() == max {
                     break;
                 }
-                if let Some((node, _)) = self.node_to_info.get(id) {
-                    if f(node) {
-                        nodes.push(node.peer_address.clone());
-                    }
+                if f(node) {
+                    nodes.push(node.peer_address.clone());
                 }
             }
         }

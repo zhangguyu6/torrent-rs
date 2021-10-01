@@ -82,6 +82,10 @@ impl Bucket {
         }
         addresses
     }
+
+    fn iter(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.values().map(|node_ext| &node_ext.node)
+    }
 }
 
 #[derive(Debug)]
@@ -107,7 +111,7 @@ impl RoutingTable {
         if node.id == self.id {
             return;
         }
-        let bucket_index = (&node.id ^ &self.id).count_zeros();
+        let bucket_index = (&node.id ^ &self.id).count_ones() - 1;
         let bucket = &mut self.buckets[bucket_index];
         bucket.insert(node);
     }
@@ -125,7 +129,7 @@ impl RoutingTable {
                 }
             }
         }
-        nodes.sort_by_key(|node| &node.id ^ target);
+        nodes.sort_by_key(|node| (&node.id ^ target).count_ones());
         nodes.truncate(max);
         nodes
     }
@@ -143,5 +147,9 @@ impl RoutingTable {
         self.buckets
             .iter()
             .fold(0, |acc, bucket| acc + bucket.nodes.len())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Node> {
+        self.buckets.iter().flat_map(|bucket| bucket.iter())
     }
 }

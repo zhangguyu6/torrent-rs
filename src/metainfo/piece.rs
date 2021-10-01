@@ -39,11 +39,11 @@ impl HashPiece {
         Self(hash_val)
     }
 
-    /// Returns the number of zero in the binary representation of HashPiece.
-    pub fn count_zeros(&self) -> usize {
+    /// Returns the number of one in the binary representation of HashPiece.
+    pub fn count_ones(&self) -> usize {
         self.0
             .iter()
-            .fold(0, |res, byte| byte.count_zeros() as usize + res)
+            .fold(0, |res, byte| byte.count_ones() as usize + res)
     }
 }
 

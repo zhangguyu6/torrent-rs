@@ -328,7 +328,7 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
             self.peer_store
                 .read()
                 .await
-                .peer_addresses(&info_hash, self.config.k, |node| {
+                .get_peer_addresses(&info_hash, self.config.k, |node| {
                     if !want_ipv4 && !want_ipv6 {
                         if addr.is_ipv4() {
                             node.peer_address.0.is_ipv4()
@@ -398,7 +398,7 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
             }
         }
         self.send_krpc_message(message, addr).await?;
-        let _ = self.peer_store.write().await.insert(
+        let _ = self.peer_store.write().await.insert_info_hash(
             info_hash,
             Node {
                 id: req.id.clone(),
@@ -693,37 +693,62 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
         }
     }
 
-    pub async fn get_peers(
-        &self,
-        addr: PeerAddress,
-        info_hash: HashPiece,
-    ) -> Result<impl Stream<Item = PeerAddress>> {
+    pub async fn get_peers(&self, info_hash: HashPiece) -> Result<impl Stream<Item = PeerAddress>> {
+        let mut closest_nodes =
+            self.routing_table
+                .read()
+                .await
+                .closest(&info_hash, self.config.k, |node| {
+                    if self.support_ipv4 && node.peer_address.0.is_ipv4() {
+                        return true;
+                    }
+                    if self.support_ipv6 && node.peer_address.0.is_ipv6() {
+                        return true;
+                    }
+                    return false;
+                });
         let (tx, rx) = unbounded();
-        let tran = Transaction::new(
-            tx,
-            self.config.depth,
-            Some(info_hash.clone()),
-            QueryType::GetPeers,
-        );
-        self.send_get_peers(addr, info_hash, tran).await?;
+        for node in closest_nodes.drain(..) {
+            let tran = Transaction::new(
+                tx.clone(),
+                self.config.depth,
+                Some(info_hash.clone()),
+                QueryType::GetPeers,
+            );
+            self.send_get_peers(node.peer_address, info_hash.clone(), tran)
+                .await?;
+        }
+
         Ok(rx.filter_map(|rsp| match rsp {
             Ok(DhtRsp::GetPeers(addr)) => Some(addr),
             _ => None,
         }))
     }
 
-    pub async fn announce_peer(&self, node: Node, info_hash: HashPiece) -> Result<()> {
+    pub async fn announce_peer(&self, info_hash: HashPiece) -> Result<impl Stream<Item = ()>> {
+        let mut closest_nodes =
+            self.routing_table
+                .read()
+                .await
+                .closest(&info_hash, self.config.k, |node| {
+                    if self.support_ipv4 && node.peer_address.0.is_ipv4() {
+                        return true;
+                    }
+                    if self.support_ipv6 && node.peer_address.0.is_ipv6() {
+                        return true;
+                    }
+                    return false;
+                });
         let (tx, rx) = unbounded();
-        let tran = Transaction::new(tx, 0, None, QueryType::AnnouncePeer);
-        self.send_announce_peer(node, info_hash, tran).await?;
-        match rx.recv().await? {
-            Ok(DhtRsp::Announced) => Ok(()),
-            Ok(rsp) => {
-                error!("expect receive announce_peer, but receive {:?}", rsp);
-                Err(DhtError::Protocol("receive unexpected rsp".to_string()))
-            }
-            Err(e) => Err(e),
+        for node in closest_nodes.drain(..) {
+            let tran = Transaction::new(tx.clone(), 0, None, QueryType::AnnouncePeer);
+            self.send_announce_peer(node, info_hash.clone(), tran)
+                .await?;
         }
+        Ok(rx.filter_map(|rsp| match rsp {
+            Ok(DhtRsp::Announced) => Some(()),
+            _ => None,
+        }))
     }
 
     pub async fn bootstrap(&self) -> Result<()> {
@@ -744,8 +769,17 @@ impl<S: PeerStore + Send + Sync + 'static> Dht<S> {
         Ok(())
     }
 
-    pub async fn dht_node_count(&self) -> usize {
+    pub async fn node_count(&self) -> usize {
         self.routing_table.read().await.count()
+    }
+
+    pub async fn iter(&self) -> Vec<Node> {
+        self.routing_table
+            .read()
+            .await
+            .iter()
+            .map(|node| node.clone())
+            .collect()
     }
 }
 
@@ -756,18 +790,196 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_dht_create() {
+    fn test_dht_bootstrap() {
         block_on(async {
             let res = Dht::new(DhtConfig::default(), MemPeerStore::default()).await;
-            // dbg!(&res);
             assert!(res.is_ok());
             sleep(Duration::from_secs(5)).await;
             let dht = res.unwrap();
-            let node_count = dht.dht_node_count().await;
-            dbg!(&node_count);
+            let node_count = dht.node_count().await;
             assert!(node_count > 0);
-            // dbg!(&dht);
+            dbg!(&node_count);
             dht.close().await;
         });
+    }
+
+    #[test]
+    fn test_dht_ping() {
+        block_on(async {
+            let id0 = HashPiece::rand_new();
+            let dht0 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6881".to_string(),
+                    id: id0.clone(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+            let dht1 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6882".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+            let res = dht1.ping("127.0.0.1:6881".parse().unwrap()).await;
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), id0);
+            dht0.close().await;
+            dht1.close().await;
+        })
+    }
+
+    #[test]
+    fn test_dht_find_node() {
+        block_on(async {
+            let id0 = HashPiece::rand_new();
+            let dht0 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6881".to_string(),
+                    id: id0.clone(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            let dht1 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6882".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            let res = dht1.ping("127.0.0.1:6881".parse().unwrap()).await;
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), id0);
+
+            let dht2 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6883".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            let res = dht2
+                .find_node("127.0.0.1:6882".parse().unwrap(), id0.clone())
+                .await;
+            assert!(res.is_ok());
+            dbg!(res.unwrap());
+
+            dht0.close().await;
+            dht1.close().await;
+            dht2.close().await;
+        })
+    }
+
+    #[test]
+    fn test_dht_get_peer() {
+        block_on(async {
+            let file_id = HashPiece::rand_new();
+            let node_id = HashPiece::rand_new();
+            let mut store = MemPeerStore::default();
+            let _ = store.insert_info_hash(
+                file_id.clone(),
+                Node {
+                    id: node_id.clone(),
+                    peer_address: PeerAddress("127.0.0.1:1".parse().unwrap()),
+                },
+            );
+            let dht0 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6881".to_string(),
+                    ..DhtConfig::default()
+                },
+                store,
+            )
+            .await
+            .unwrap();
+            let dht1 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6882".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+            let res = dht1.ping("127.0.0.1:6881".parse().unwrap()).await;
+            assert!(res.is_ok());
+
+            let res = dht1.get_peers(file_id).await;
+            assert!(res.is_ok());
+            let mut s = res.unwrap();
+            let address = s.next().await;
+            assert_eq!(address, Some(PeerAddress("127.0.0.1:1".parse().unwrap())));
+            dht0.close().await;
+            dht1.close().await;
+        })
+    }
+
+    #[test]
+    fn test_dht_announce_peer() {
+        block_on(async {
+            let file_id = HashPiece::rand_new();
+
+            let dht0 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6881".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            let dht1 = Dht::new(
+                DhtConfig {
+                    local_addr: "0.0.0.0:6883".to_string(),
+                    ..DhtConfig::default()
+                },
+                MemPeerStore::default(),
+            )
+            .await
+            .unwrap();
+
+            let res = dht1.ping("127.0.0.1:6881".parse().unwrap()).await;
+            assert!(res.is_ok());
+
+            let res = dht1.get_peers(file_id.clone()).await;
+            assert!(res.is_ok());
+            let mut s = res.unwrap();
+            let address = s.next().await;
+            assert_eq!(address, None);
+
+            let res = dht1.announce_peer(file_id.clone()).await;
+            assert!(res.is_ok());
+            let mut s = res.unwrap();
+            let address = s.next().await;
+            assert_eq!(address, Some(()));
+
+            let res = dht1.get_peers(file_id.clone()).await;
+            assert!(res.is_ok());
+            let mut s = res.unwrap();
+            let address = s.next().await;
+            assert_eq!(
+                address,
+                Some(PeerAddress("127.0.0.1:6883".parse().unwrap()))
+            );
+
+            dht0.close().await;
+            dht1.close().await;
+        })
     }
 }

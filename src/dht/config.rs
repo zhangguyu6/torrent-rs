@@ -40,7 +40,7 @@ impl Default for DhtConfig {
             refresh_interval: Duration::from_secs(60 * 1),
             depth: 4,
             implied_port: true,
-            local_addr: ":::6881".to_string(),
+            local_addr: "0.0.0.0:6881".to_string(),
             bootstrap_addrs: vec![
                 "router.bittorrent.com:6881".to_string(),
                 "router.utorrent.com:6881".to_string(),
