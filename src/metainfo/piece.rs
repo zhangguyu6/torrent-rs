@@ -47,18 +47,6 @@ impl HashPiece {
     }
 }
 
-impl BitXor for HashPiece {
-    type Output = HashPiece;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        let mut pieces = HashPiece::default();
-        for i in 0..ID_LEN {
-            pieces.0[i] = self.0[i] ^ rhs.0[i];
-        }
-        pieces
-    }
-}
-
 impl BitXor for &HashPiece {
     type Output = HashPiece;
 
@@ -108,8 +96,8 @@ impl<'de> Deserialize<'de> for HashPiece {
     }
 }
 
+/// Create HashPieces by hashing the given bytes.
 impl From<&[u8]> for HashPiece {
-    /// Create HashPieces by hashing the given bytes.
     fn from(bytes: &[u8]) -> Self {
         let mut hasher = Sha1::new();
         hasher.update(bytes);
@@ -118,8 +106,8 @@ impl From<&[u8]> for HashPiece {
     }
 }
 
+/// Create HashPieces by hashing the Info dictionary.
 impl From<Info> for HashPiece {
-    /// Create HashPieces by hashing the Info dictionary.
     fn from(info: Info) -> Self {
         let buf = to_bytes(&info).unwrap();
         let mut hasher = Sha1::new();
@@ -129,8 +117,8 @@ impl From<Info> for HashPiece {
     }
 }
 
+/// Create HashPieces by hashing the Bencode Value.
 impl From<Value> for HashPiece {
-    /// Create HashPieces by hashing the Bencode Value.
     fn from(value: Value) -> Self {
         let buf = to_bytes(&value).unwrap();
         let mut hasher = Sha1::new();
