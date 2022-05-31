@@ -1,26 +1,20 @@
-use crate::bencode::BencodeError;
-use crate::krpc::KrpcError;
 use std::net::AddrParseError;
 use std::path::StripPrefixError;
 use std::{io, result};
 use thiserror::Error;
 
-pub type Result<T> = result::Result<T, MetaInfoError>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Error, Debug)]
-pub enum MetaInfoError {
-    #[error("Io {0}")]
+pub enum Error {
+    #[error("{0}")]
     Io(#[from] io::Error),
-    #[error("Address {0}")]
+    #[error("{0}")]
     Address(#[from] AddrParseError),
-    #[error("StripPrefix {0}")]
+    #[error("{0}")]
     StripPrefix(#[from] StripPrefixError),
-    #[error("PathConvert")]
+    #[error("Path convert failed")]
     PathConvert,
-    #[error("EmptyRootPath")]
+    #[error("Root path is empty")]
     EmptyRootPath,
-    #[error("Krpc {0}")]
-    Krpc(#[from] KrpcError),
-    #[error("Bencode {0}")]
-    Bencode(#[from] BencodeError),
 }

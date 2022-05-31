@@ -1,10 +1,7 @@
-use crate::bencode::BencodeError;
-use crate::krpc::KrpcError;
 use async_std::channel::RecvError;
 use async_std::future::TimeoutError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
-use serde::{de, ser};
 use std::net::AddrParseError;
 use std::path::StripPrefixError;
 use std::str::Utf8Error;
@@ -43,10 +40,6 @@ pub enum Error {
     FromParseUrlErr(#[from] ParseUrlError),
     #[error("Utf8Err {0}")]
     Utf8Err(#[from] Utf8Error),
-    #[error("KrpcErr {0}")]
-    KrpcErr(#[from] KrpcError),
-    #[error("BencodeError {0}")]
-    BencodeError(#[from] BencodeError),
     #[error("DhtAddrBindErr")]
     DhtAddrBindErr,
     #[error("ChannelClosed {0}")]
@@ -65,16 +58,4 @@ pub enum Error {
     DhtCallBackErr,
     #[error("TimeoutError")]
     TimeoutError(#[from] TimeoutError),
-}
-
-impl ser::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
-        Error::CustomErr(msg.to_string())
-    }
-}
-
-impl de::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
-        Error::CustomErr(msg.to_string())
-    }
 }

@@ -1,6 +1,6 @@
-use super::PeerAddress;
-use crate::bencode::Value;
-use crate::error::{Error, Result};
+use super::address::PeerAddress;
+use super::info::Info;
+use crate::error::Result;
 use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -9,6 +9,8 @@ use std::result::Result as StdResult;
 use std::{collections::HashSet, fmt, str};
 use url::Url;
 
+/// UrlList represents a list of web addresses where torrent data can be retrieved.
+/// This type is used by  [`MetaInfo`]
 #[derive(Debug, PartialEq, Eq)]
 pub struct UrlList(Vec<Url>);
 
@@ -71,8 +73,7 @@ impl<'de> Deserialize<'de> for UrlList {
 /// The MetaInfo represents the .torrent file.
 pub struct MetaInfo {
     /// Info dictionary
-    pub info: Value,
-
+    pub info: Info,
     /// The URL of the tracker single
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -119,19 +120,8 @@ pub struct MetaInfo {
 }
 
 impl MetaInfo {
-    pub fn get_name(&self) -> Result<String> {
-        match &self.info {
-            Value::Dict(m) => {
-                if let Some(v) = m.get("name") {
-                    match v {
-                        Value::Bytes(buf) => return Ok(String::from_utf8(buf.clone())?),
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-        Err(Error::CustomErr("not find name".to_string()))
+    pub fn get_name(&self) -> String {
+        self.info.name.clone()
     }
     pub fn get_trackers(&self) -> Result<Vec<Url>> {
         if let Some(announce) = &self.announce {
@@ -159,13 +149,16 @@ impl MetaInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bencode::{from_bytes, from_str, to_bytes, to_str};
+    use serde_bencode::{
+        de::{from_bytes, from_str},
+        ser::{to_bytes, to_string},
+    };
 
     #[test]
     fn test_url_list() {
         let a = "http://qq1.com/".to_string();
         assert_eq!(
-            to_str(&UrlList(vec![Url::parse(&a).unwrap()])).unwrap(),
+            to_string(&UrlList(vec![Url::parse(&a).unwrap()])).unwrap(),
             "15:http://qq1.com/".to_string()
         );
         assert_eq!(
@@ -174,7 +167,7 @@ mod tests {
         );
         let b = "http://qq2.com/".to_string();
         assert_eq!(
-            to_str(&UrlList(vec![
+            to_string(&UrlList(vec![
                 Url::parse(&a).unwrap(),
                 Url::parse(&b).unwrap()
             ]))
@@ -191,13 +184,11 @@ mod tests {
     fn test_meta_info() {
         let raw_torrent =
             include_bytes!("example/archlinux-2011.08.19-netinstall-i686.iso.torrent");
-        // let raw_torrent = include_bytes!("example/1.txt.torrent");
         let res = from_bytes::<MetaInfo>(raw_torrent);
         assert!(res.is_ok());
         let meta_info_a = res.unwrap();
         let meta_info_b =
             from_bytes::<MetaInfo>(to_bytes(&meta_info_a).unwrap().as_slice()).unwrap();
-        dbg!(&meta_info_a, &meta_info_b);
         assert_eq!(&meta_info_a, &meta_info_b);
         assert_eq!(to_bytes(&meta_info_b).unwrap().as_slice(), &raw_torrent[..]);
     }

@@ -1,12 +1,12 @@
-use super::error::{MetaInfoError, Result};
+use super::error::{Error, Result};
 use super::piece::HashPieces;
-use crate::bencode::{from_value, to_value, Value};
 use async_std::{fs, stream::StreamExt};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::{cmp::Ordering, convert::TryFrom};
 
+/// File represents a file in a torrent.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Ord, Clone)]
 pub struct File {
     /// Length of the file in bytes
@@ -24,7 +24,7 @@ impl PartialOrd for File {
 }
 
 impl File {
-    pub async fn walk<P: AsRef<Path>>(root: P) -> Result<(Vec<File>, Vec<PathBuf>)> {
+    pub async fn generate_from_root<P: AsRef<Path>>(root: P) -> Result<(Vec<File>, Vec<PathBuf>)> {
         let mut files = Vec::new();
         let mut paths = Vec::new();
         let mut deque: VecDeque<PathBuf> = VecDeque::new();
@@ -57,6 +57,11 @@ impl File {
     }
 }
 
+/// Info represents a dictionary that describes the file(s) of the torrent.
+/// This type is used by  [`super::meta::MetaInfo`]
+/// There are two possible forms:
+/// one for the case of a 'single-file' torrent with no directory structure,
+/// and one for the case of a 'multi-file' torrent (see https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure for details)
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default, Clone)]
 pub struct Info {
     /// Name of the file in the single file case
@@ -85,10 +90,10 @@ impl Info {
         let name = match root_path.as_ref().file_name() {
             Some(s) => s
                 .to_str()
-                .map_or(Err(MetaInfoError::PathConvert), |v| Ok(v.to_string()))?,
-            None => return Err(MetaInfoError::EmptyRootPath),
+                .map_or(Err(Error::PathConvert), |v| Ok(v.to_string()))?,
+            None => return Err(Error::EmptyRootPath),
         };
-        let (files, paths) = File::walk(root_path).await?;
+        let (files, paths) = File::generate_from_root(root_path).await?;
         let mut readers = Vec::with_capacity(paths.len());
         for path in paths {
             readers.push(fs::OpenOptions::new().read(true).open(path).await?);
@@ -96,19 +101,19 @@ impl Info {
         let pieces = HashPieces::hash_pieces(readers, piece_length).await?;
         if files.len() == 1 {
             Ok(Self {
-                name: name,
-                piece_length: piece_length,
-                pieces: pieces,
+                name,
+                piece_length,
+                pieces,
                 length: Some(files[0].length),
                 files: Vec::new(),
             })
         } else {
             Ok(Self {
-                name: name,
-                piece_length: piece_length,
-                pieces: pieces,
+                name,
+                piece_length,
+                pieces,
                 length: None,
-                files: files,
+                files,
             })
         }
     }
@@ -117,25 +122,12 @@ impl Info {
     }
 }
 
-impl TryFrom<Value> for Info {
-    type Error = MetaInfoError;
-    fn try_from(value: Value) -> Result<Self> {
-        Ok(from_value(value)?)
-    }
-}
-
-impl Into<Value> for Info {
-    fn into(self) -> Value {
-        to_value(self).unwrap()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bencode::{from_value, to_value};
     use crate::metainfo::piece::PIECE_SIZE_256_KB;
     use async_std::task::block_on;
+    use serde_bencode::{de::from_bytes, ser::to_bytes};
     use std::io::Write;
     use tempfile::{tempdir, NamedTempFile};
 
@@ -154,9 +146,9 @@ mod tests {
             dbg!(&info);
             assert!(info.is_ok());
             let info = info.unwrap();
-            let value = to_value(info.clone());
-            assert!(value.is_ok());
-            let info1 = from_value(value.unwrap());
+            let value = to_bytes(&info);
+            assert!(value.is_ok(), "{}", value.unwrap_err());
+            let info1 = from_bytes(value.unwrap().as_ref());
             assert!(info1.is_ok());
             let info1 = info1.unwrap();
             assert_eq!(info, info1);

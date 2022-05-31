@@ -1,4 +1,3 @@
-use crate::metainfo::MetaInfoError;
 use data_encoding::DecodeError;
 use hex::FromHexError;
 use std::result;
@@ -17,6 +16,4 @@ pub enum MagnetError {
     FromParseUrl(#[from] ParseUrlError),
     #[error("FromHex {0}")]
     FromHex(#[from] FromHexError),
-    #[error("MetaInfo {0}")]
-    MetaInfo(#[from] MetaInfoError),
 }

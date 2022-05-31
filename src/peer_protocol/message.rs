@@ -40,23 +40,25 @@ impl Default for MessageType {
     }
 }
 
+/// Meesage is the message used by the peer protocol.
 #[derive(Debug, PartialEq, Eq, Default)]
 pub struct Message {
     is_keepalive: bool,
     msg_type: MessageType,
-    /// Represents the index which that downloader just completed and checked the hash of
-    /// Used by Have,Request,Piece,Cancel
+    /// Represents the index which that downloader just completed and checked the hash of.
+    /// Used by Have, Request, Piece, Cancel
     index: usize,
-    /// Represents the start of byte offsets
+    /// Represents the start of byte offsets.
     /// Used by Reqeust, Cancel, Piece
     begin: usize,
-    /// Represents the length of byte offsets
+    /// Represents the length of byte offsets.
     /// Used by Reqeust, Cancel
     length: usize,
-    /// Represents the data correlated with request messages implicitly
+    /// Represents the data correlated with request messages implicitly.
     /// Used by Piece
     piece: Vec<u8>,
-    /// Represents a bitfield with each index that downloader has sent set to one and the rest set to zero
+    /// Represents a bitfield with each index that downloader has sent set to one and the rest set to zero.
+    /// Used by BitFiled
     bit_field: BitVec<Lsb0, u8>,
 }
 

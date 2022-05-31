@@ -1,6 +1,5 @@
 use super::error::Result;
-use super::Info;
-use crate::bencode::{to_bytes, Value};
+use super::info::Info;
 use async_std::{
     io::{self, Read, ReadExt},
     task::ready,
@@ -10,6 +9,7 @@ use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use serde_bencode::ser::to_bytes;
 use sha1::{Digest, Sha1};
 use std::convert::TryInto;
 use std::fmt;
@@ -96,7 +96,7 @@ impl<'de> Deserialize<'de> for HashPiece {
     }
 }
 
-/// Create HashPieces by hashing the given bytes.
+/// Create HashPiece by hashing the given bytes.
 impl From<&[u8]> for HashPiece {
     fn from(bytes: &[u8]) -> Self {
         let mut hasher = Sha1::new();
@@ -106,21 +106,10 @@ impl From<&[u8]> for HashPiece {
     }
 }
 
-/// Create HashPieces by hashing the Info dictionary.
-impl From<Info> for HashPiece {
-    fn from(info: Info) -> Self {
+/// Create HashPiece by hashing the Info dictionary.
+impl From<&Info> for HashPiece {
+    fn from(info: &Info) -> Self {
         let buf = to_bytes(&info).unwrap();
-        let mut hasher = Sha1::new();
-        hasher.update(&buf);
-        let hash_val: [u8; 20] = hasher.finalize().into();
-        HashPiece::new(hash_val)
-    }
-}
-
-/// Create HashPieces by hashing the Bencode Value.
-impl From<Value> for HashPiece {
-    fn from(value: Value) -> Self {
-        let buf = to_bytes(&value).unwrap();
         let mut hasher = Sha1::new();
         hasher.update(&buf);
         let hash_val: [u8; 20] = hasher.finalize().into();
@@ -278,9 +267,9 @@ impl<R: Read + Unpin> Read for Chains<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bencode::{from_bytes, to_bytes};
     use async_std::fs::OpenOptions;
     use async_std::task::block_on;
+    use serde_bencode::{de::from_bytes, ser::to_bytes};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
