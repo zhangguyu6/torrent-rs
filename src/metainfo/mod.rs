@@ -10,8 +10,8 @@ pub use error::Error;
 mod info;
 pub use info::Info;
 
-mod meta;
-pub use meta::{MetaInfo, UrlList};
+mod metainfo;
+pub use metainfo::{MetaInfo, UrlList};
 
 mod piece;
 pub(crate) use piece::ID_LEN;

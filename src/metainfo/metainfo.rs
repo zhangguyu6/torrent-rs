@@ -1,5 +1,5 @@
-use super::address::PeerAddress;
 use super::info::Info;
+use super::{address::PeerAddress, HashPiece};
 use crate::error::Result;
 use serde::{
     de::{self, SeqAccess, Visitor},
@@ -122,6 +122,9 @@ pub struct MetaInfo {
 impl MetaInfo {
     pub fn get_name(&self) -> String {
         self.info.name.clone()
+    }
+    pub fn get_info_hash(&self) -> HashPiece {
+        (&self.info).into()
     }
     pub fn get_trackers(&self) -> Result<Vec<Url>> {
         if let Some(announce) = &self.announce {
